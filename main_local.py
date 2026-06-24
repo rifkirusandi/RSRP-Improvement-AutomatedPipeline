@@ -61,7 +61,7 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-    if 'Kulon Progo' not in airport_name: continue
+    # Process all airports
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")
@@ -277,7 +277,7 @@ for apt in airports:
     clutter_gdf = gpd.GeoDataFrame()
     try:
         if len(global_clutter_gdf) > 0:
-            clutter_gdf = gpd.clip(global_clutter_gdf, (l_min, la_min, l_max, la_max)).copy()
+            clutter_gdf = global_clutter_gdf.cx[l_min:l_max, la_min:la_max].copy()
             if not clutter_gdf.empty:
                 clutter_gdf['geometry'] = clutter_gdf.geometry.buffer(0)
                 clutter_gdf = clutter_gdf.to_crs(epsg=3857)
@@ -362,78 +362,12 @@ for apt in airports:
                         sector_poly_calc = None
                         
                         placed = False
-                        cluster_isd_base = get_isd_min(centroid_3857)
-                        
-                        ns_pt = None
-                        relaxation = 0
-                        
-                        while ns_pt is None and relaxation <= 1500:
-                            current_isd = max(500, cluster_isd_base - relaxation)
-                            
-                            # Try centroid first
-                            too_close = False
-                            for s_info in current_sites_info.values():
-                                if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
-                                    too_close = True
-                                    break
-                            
-                            if not too_close:
-                                ns_pt = centroid_3857
-                            else:
-                                # Find another point in the cluster that respects ISD
-                                for geom in cluster_pts.geometry:
-                                    too_close = False
-                                    for s_info in current_sites_info.values():
-                                        if geom.distance(Point(s_info['x'], s_info['y'])) < current_isd:
-                                            too_close = True
-                                            break
-                                    if not too_close:
-                                        ns_pt = geom
-                                        break
-                                        
-                            relaxation += 100
-                                    
-                        if ns_pt is not None:
-                            lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
-                            
-                            if ns_pt.distance(centroid_3857) > 1:
-                                base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
-                            else:
-                                base_az = 0
-                                
-                            azs = [base_az, (base_az + 120) % 360, (base_az + 240) % 360]
-                            
-                            new_site_key = f"new_{iteration}"
-                            current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'azimuths': azs}
-                            
-                            for az in azs:
-                                poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200)
-                                poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m)
-                                
-                                global_newsite.append(poly_viz)
-                                global_calc_sectors.append(poly_calc)
-                                global_additional.append(poly_viz)
-                                
-                                uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
-                            placed = True
-                            
-                        if not placed:
-                            # We could NOT place a new site due to strict ISD.
-                            # Fallback: add an additional sector to the closest existing site
-                            closest_site_key = None
-                            closest_dist = float('inf')
-                            
-                            for s_key, s_info in current_sites_info.items():
-                                max_sec = 3 if 'new_' in s_key else 4
-                                if len(s_info['azimuths']) >= max_sec: continue
-                                site_pt = Point(s_info['x'], s_info['y'])
-                                dist = site_pt.distance(centroid_3857)
-                                if dist < closest_dist and dist <= radius_m:
-                                    closest_dist = dist
-                                    closest_site_key = s_key
-                            
-                            if closest_site_key is not None:
-                                s_info = current_sites_info[closest_site_key]
+                        for s_key, s_info in current_sites_info.items():
+                            max_sec = 3 if 'new_' in s_key else 4
+                            if len(s_info['azimuths']) >= max_sec: continue
+                            site_pt = Point(s_info['x'], s_info['y'])
+                            dist = site_pt.distance(centroid_3857)
+                            if dist <= radius_m:
                                 lon_s, lat_s = transformer_to_4326.transform(s_info['x'], s_info['y'])
                                 azimuth = calculate_bearing(lon_s, lat_s, lon_c, lat_c)
                                 if is_valid_azimuth(azimuth, s_info['azimuths'], 90):
@@ -444,10 +378,66 @@ for apt in airports:
                                     global_calc_sectors.append(sector_poly_calc)
                                     uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(sector_poly_calc)]
                                     placed = True
-
+                                    break
+                        
                         if not placed:
-                            print(f"DEBUG: Dropping cluster {largest_cluster} because no point respects ISD, and no existing site can take a new sector.")
-                            uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
+                            cluster_isd_base = get_isd_min(centroid_3857)
+                            
+                            ns_pt = None
+                            relaxation = 0
+                            
+                            while ns_pt is None and relaxation <= 1500:
+                                current_isd = max(500, cluster_isd_base - relaxation)
+                                
+                                # Try centroid first
+                                too_close = False
+                                for s_info in current_sites_info.values():
+                                    if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
+                                        too_close = True
+                                        break
+                                
+                                if not too_close:
+                                    ns_pt = centroid_3857
+                                else:
+                                    # Find another point in the cluster that respects ISD
+                                    for geom in cluster_pts.geometry:
+                                        too_close = False
+                                        for s_info in current_sites_info.values():
+                                            if geom.distance(Point(s_info['x'], s_info['y'])) < current_isd:
+                                                too_close = True
+                                                break
+                                        if not too_close:
+                                            ns_pt = geom
+                                            break
+                                            
+                                relaxation += 100
+                                        
+                            if ns_pt is None:
+                                print(f"DEBUG: Dropping cluster {largest_cluster} because no point respects ISD.")
+                                uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
+                            else:
+                                lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
+                                
+                                # Propose 3 sectors. First pointing to the center of bad RSRP (if offset), or just North
+                                if ns_pt.distance(centroid_3857) > 1:
+                                    base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
+                                else:
+                                    base_az = 0
+                                    
+                                azs = [base_az, (base_az + 120) % 360, (base_az + 240) % 360]
+                                
+                                new_site_key = f"new_{iteration}"
+                                current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'azimuths': azs}
+                                
+                                for az in azs:
+                                    poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200)
+                                    poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m)
+                                    
+                                    global_newsite.append(poly_viz)
+                                    global_calc_sectors.append(poly_calc)
+                                    global_additional.append(poly_viz)
+                                    
+                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
                                     
                         if len(uncovered_bad_spots) == previous_uncovered_len:
                             print(f"DEBUG: No spots covered! Dropping cluster {largest_cluster} to avoid infinite loop.")

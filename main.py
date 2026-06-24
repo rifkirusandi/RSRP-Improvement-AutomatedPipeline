@@ -22,11 +22,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Constants
-MR_DIR = r"C:\Request\Airport Improvement\MR AIRPORT"
-SITES_CSV = r"C:\Request\Airport Improvement\sites covering airport in all huawei foot-print v1.csv"
-SHP_PATH = r"C:\Request\Airport Improvement\Internasional Airport Border\Internasional Airport Border.shp"
-TERRITORY_PATH = r"C:\Request\Airport Improvement\Territory\Territory IOH 202605 - May v3.shp"
-CLUTTER_PATH = r"C:\Request\Airport Improvement\Clutter\Morphology Indonesia V4.TAB"
+MR_DIR = r"PATH_TO_MR_CSV_DIRECTORY"
+SITES_CSV = r"PATH_TO_GLOBAL_SITES_CSV"
+SHP_PATH = r"PATH_TO_AIRPORT_BORDER_SHP"
+TERRITORY_PATH = r"PATH_TO_TERRITORY_SHP"
+CLUTTER_PATH = r"PATH_TO_CLUTTER_TAB"
 OUT_DIR = "Output"
 os.makedirs(OUT_DIR, exist_ok=True)
 

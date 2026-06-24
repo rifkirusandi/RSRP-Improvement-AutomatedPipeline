@@ -16,13 +16,13 @@ This tool automates the process of optimizing 4G/LTE cell site coverage (RSRP an
 - python-pptx (for PowerPoint generation)
 
 ## Input Data Requirements
-*Note: Due to file sizes and confidentiality, all inputs must be placed in `C:\Request\Airport Improvement\` or modified directly within the `main.py` paths. Inputs are `.gitignore`d.*
+*Note: Due to file sizes and confidentiality, all input paths must be configured directly within the `main.py` Constants section. Inputs are `.gitignore`d.*
 
 The pipeline expects:
-1. `Internasional Airport Border.shp`
-2. `Territory IOH 202605 - May v3.shp`
-3. `Morphology Indonesia V4.TAB` (Clutter data)
-4. `List Site` and `MR AIRPORT` CSV logs for each airport containing `Longitude`, `Latitude`, `RSRP`, `RSRQ`, and `Azimuth`.
+1. Airport Border shapefile (`.shp`)
+2. Territory boundary shapefile (`.shp`)
+3. Morphology Clutter data (`.TAB`)
+4. Global Sites CSV and MR/MDT CSV logs for each airport containing `Longitude`, `Latitude`, `RSRP`, `RSRQ`, and `Azimuth`.
 
 ## Usage
 Simply run the main script:

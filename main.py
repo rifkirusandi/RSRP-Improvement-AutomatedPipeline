@@ -500,6 +500,13 @@ for apt in airports:
             mr_gdf = processed_gdfs.get(mr_key)
             mdt_gdf = processed_gdfs.get(f"{metric}_{env}_MDT")
             
+            no_data = True
+            if mr_gdf is not None and not mr_gdf.empty: no_data = False
+            if mdt_gdf is not None and not mdt_gdf.empty: no_data = False
+            
+            if no_data:
+                fig.text(0.5, 0.5, "MR/MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+            
             titles = ['Map', f'MR {metric}', f'MDT {metric}']
             
             for i, ax in enumerate(axes):

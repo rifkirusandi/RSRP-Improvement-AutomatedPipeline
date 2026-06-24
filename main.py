@@ -22,11 +22,11 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Constants
-MR_DIR = r"PATH_TO_MR_CSV_DIRECTORY"
-SITES_CSV = r"PATH_TO_GLOBAL_SITES_CSV"
-SHP_PATH = r"PATH_TO_AIRPORT_BORDER_SHP"
-TERRITORY_PATH = r"PATH_TO_TERRITORY_SHP"
-CLUTTER_PATH = r"PATH_TO_CLUTTER_TAB"
+MR_DIR = r"C:\Request\Airport Improvement\MR AIRPORT"
+SITES_CSV = r"C:\Request\Airport Improvement\sites covering airport in all huawei foot-print v1.csv"
+SHP_PATH = r"C:\Request\Airport Improvement\Internasional Airport Border\Internasional Airport Border.shp"
+TERRITORY_PATH = r"C:\Request\Airport Improvement\Territory\Territory IOH 202605 - May v3.shp"
+CLUTTER_PATH = r"C:\Request\Airport Improvement\Clutter\Morphology Indonesia V4.TAB"
 OUT_DIR = "Output"
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -61,7 +61,7 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-    # No filter, load all airports
+    # Process all airports
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")
@@ -116,6 +116,21 @@ for metric in ['RSRP', 'RSRQ']:
             fpath = os.path.join(MR_DIR, fname)
             if os.path.exists(fpath):
                 raw_data[f"{metric}_{env}_{src}"] = pd.read_csv(fpath)
+
+print("Loading Clutter globally into memory...")
+try:
+    with fiona.open(CLUTTER_PATH) as src:
+        features = list(src)
+        if features:
+            geoms = [shape(f['geometry']) for f in features if f['geometry'] is not None]
+            props = [f['properties'] for f in features if f['geometry'] is not None]
+            global_clutter_gdf = gpd.GeoDataFrame(props, geometry=geoms, crs=src.crs)
+            global_clutter_gdf = global_clutter_gdf.to_crs(epsg=4326)
+        else:
+            global_clutter_gdf = gpd.GeoDataFrame()
+except Exception as e:
+    print(f"Error loading global clutter: {e}")
+    global_clutter_gdf = gpd.GeoDataFrame()
 
 def get_sector_polygon(cx_m, cy_m, lat, azimuth, radius_m=200, angle_deg=65):
     if pd.isna(azimuth): azimuth = 0
@@ -217,6 +232,8 @@ def get_best_azimuths(site_pt_3857, radius_m, existing_azimuths, bad_spots_3857,
 
 for apt in airports:
     name = apt['name']
+    
+    
     print(f"\nProcessing {name}...")
     
     l_min, l_max = apt['lon_min'], apt['lon_max']
@@ -227,14 +244,21 @@ for apt in airports:
         (df_cells_all['Latitude'] >= la_min) & (df_cells_all['Latitude'] <= la_max)
     ].copy()
     
+    # Filter cell sites to current airport bounds with a small buffer (~10km)
+    buffer_deg = 0.1
+    df_cells_apt = df_cells[
+        (df_cells['Longitude'] >= l_min - buffer_deg) & (df_cells['Longitude'] <= l_max + buffer_deg) &
+        (df_cells['Latitude'] >= la_min - buffer_deg) & (df_cells['Latitude'] <= la_max + buffer_deg)
+    ].copy()
+    
     # Store site states
     # site_id -> {'x': x, 'y': y, 'lat': lat, 'azimuths': []}
     sites_info = {}
     
     gdf_cells_3857 = gpd.GeoDataFrame()
-    if len(df_cells) > 0:
+    if len(df_cells_apt) > 0:
         gdf_cells = gpd.GeoDataFrame(
-            df_cells, geometry=gpd.points_from_xy(df_cells.Longitude, df_cells.Latitude), crs="EPSG:4326"
+            df_cells_apt, geometry=gpd.points_from_xy(df_cells_apt.Longitude, df_cells_apt.Latitude), crs="EPSG:4326"
         )
         gdf_cells_3857 = gdf_cells.to_crs(epsg=3857)
         sectors = []
@@ -249,15 +273,12 @@ for apt in airports:
     else:
         gdf_sectors = gpd.GeoDataFrame(geometry=[], crs="EPSG:3857")
 
-    print(" Loading Clutter...")
+    print(" Fetching Clutter...")
     clutter_gdf = gpd.GeoDataFrame()
     try:
-        with fiona.open(CLUTTER_PATH) as src:
-            features = list(src.filter(bbox=(l_min, la_min, l_max, la_max)))
-            if features:
-                geoms = [shape(f['geometry']) for f in features if f['geometry'] is not None]
-                props = [f['properties'] for f in features if f['geometry'] is not None]
-                clutter_gdf = gpd.GeoDataFrame(props, geometry=geoms, crs=src.crs)
+        if len(global_clutter_gdf) > 0:
+            clutter_gdf = global_clutter_gdf.cx[l_min:l_max, la_min:la_max].copy()
+            if not clutter_gdf.empty:
                 clutter_gdf['geometry'] = clutter_gdf.geometry.buffer(0)
                 clutter_gdf = clutter_gdf.to_crs(epsg=3857)
     except Exception as e:
@@ -292,14 +313,13 @@ for apt in airports:
     global_calc_sectors = []
 
     try:
-        indoor_key = "RSRP_Indoor_MR"
-        if indoor_key in raw_data:
-            df_in = raw_data[indoor_key]
+        all_rsrp_dfs = [raw_data[k] for k in raw_data if 'RSRP' in k]
+        if all_rsrp_dfs:
+            df_in = pd.concat(all_rsrp_dfs, ignore_index=True)
             df_in = df_in[(df_in['Longitude'] >= l_min) & (df_in['Longitude'] <= l_max) &
                           (df_in['Latitude'] >= la_min) & (df_in['Latitude'] <= la_max)].copy()
             if len(df_in) > 0:
                 gdf_in = gpd.GeoDataFrame(df_in, geometry=gpd.points_from_xy(df_in.Longitude, df_in.Latitude), crs="EPSG:4326")
-                gdf_in = gpd.sjoin(gdf_in, gdf_territory_4326, how='inner', predicate='intersects')
                 airport_poly_4326 = apt['gdf_4326'].geometry.iloc[0]
                 airport_poly_3857 = apt['gdf_3857'].geometry.iloc[0]
                 airport_exterior = airport_poly_3857.exterior
@@ -317,9 +337,11 @@ for apt in airports:
                     for k in current_sites_info:
                         current_sites_info[k]['azimuths'] = list(current_sites_info[k]['azimuths'])
                         
-                    # Iterative Simulation (>95% coverage)
+                    # Iterative Simulation (100% coverage)
                     iteration = 0
-                    while len(uncovered_bad_spots) > 0 and (len(uncovered_bad_spots) / total_pts_in_airport > 0.05) and iteration < 50:
+                    while len(uncovered_bad_spots) > 0 and iteration < 100:
+                        previous_uncovered_len = len(uncovered_bad_spots)
+                        print(f"  Iteration {iteration}, Remaining Bad Spots: {len(uncovered_bad_spots)}")
                         iteration += 1
                         coords = np.array([(geom.x, geom.y) for geom in uncovered_bad_spots.geometry])
                         db = DBSCAN(eps=150, min_samples=3).fit(coords)
@@ -354,73 +376,76 @@ for apt in airports:
                                     sector_poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], azimuth, radius_m=200)
                                     global_additional.append(sector_poly_viz)
                                     global_calc_sectors.append(sector_poly_calc)
+                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(sector_poly_calc)]
                                     placed = True
                                     break
                         
                         if not placed:
-                            # Enforce ISD dynamically based on clutter for New Sites
-                            num_points = int(airport_exterior.length / 50)
-                            candidates = [airport_exterior.interpolate(i/num_points, normalized=True) for i in range(max(1, num_points))]
+                            cluster_isd_base = get_isd_min(centroid_3857)
                             
-                            valid_candidates = []
+                            ns_pt = None
                             relaxation = 0
-                            while not valid_candidates and relaxation <= 1500:
-                                for cand in candidates:
-                                    too_close = False
-                                    cand_isd = max(500, get_isd_min(cand) - relaxation)
-                                    for s_info in current_sites_info.values():
-                                        if cand.distance(Point(s_info['x'], s_info['y'])) < cand_isd:
-                                            too_close = True
-                                            break
-                                    if not too_close:
-                                        valid_candidates.append(cand)
-                                if not valid_candidates:
-                                    relaxation += 100
-                                    
-                            if valid_candidates:
-                                ns_pt = min(valid_candidates, key=lambda p: p.distance(centroid_3857))
-                                if ns_pt.distance(centroid_3857) <= radius_m:
-                                    lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
-                                    azimuth1 = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
-                                    
-                                    sector_poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, azimuth1, radius_m=radius_m)
-                                    sector_poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, azimuth1, radius_m=200)
-                                    
-                                    global_newsite.append(sector_poly_viz)
-                                    
-                                    # First priority: use remaining sectors to cover more INSIDE bad spots
-                                    best_azs = get_best_azimuths(ns_pt, radius_m, [azimuth1], uncovered_bad_spots, max_sectors=3)
-                                    
-                                    # Second priority: if we still have slots, use them for OUTSIDE bad spots
-                                    if len(best_azs) < 3:
-                                        all_bad_spots_3857 = gdf_in[gdf_in['RSRP(All MRs) (dBm)'] < -105].to_crs(epsg=3857)
-                                        best_azs = get_best_azimuths(ns_pt, radius_m, best_azs, all_bad_spots_3857, max_sectors=3)
-                                        
-                                    # Force complete to 3 sectors uniformly if still empty
-                                    while len(best_azs) < 3:
-                                        for offset in [120, 240, 90, 180, 270]:
-                                            candidate = (best_azs[0] + offset) % 360
-                                            if is_valid_azimuth(candidate, best_azs, 90):
-                                                best_azs.append(candidate)
-                                                break
-                                    
-                                    for az in best_azs[1:]:
-                                        global_newsite.append(get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200))
-                                        extra_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m)
-                                        global_calc_sectors.append(extra_calc)
-                                        uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(extra_calc)]
-                                    
-                                    new_site_key = f"new_{iteration}"
-                                    current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'azimuths': best_azs}
+                            
+                            while ns_pt is None and relaxation <= 1500:
+                                current_isd = max(500, cluster_isd_base - relaxation)
+                                
+                                # Try centroid first
+                                too_close = False
+                                for s_info in current_sites_info.values():
+                                    if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
+                                        too_close = True
+                                        break
+                                
+                                if not too_close:
+                                    ns_pt = centroid_3857
                                 else:
-                                    uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
-                            else:
+                                    # Find another point in the cluster that respects ISD
+                                    for geom in cluster_pts.geometry:
+                                        too_close = False
+                                        for s_info in current_sites_info.values():
+                                            if geom.distance(Point(s_info['x'], s_info['y'])) < current_isd:
+                                                too_close = True
+                                                break
+                                        if not too_close:
+                                            ns_pt = geom
+                                            break
+                                            
+                                relaxation += 100
+                                        
+                            if ns_pt is None:
+                                print(f"DEBUG: Dropping cluster {largest_cluster} because no point respects ISD.")
                                 uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
-
-                        if sector_poly_calc:
-                            global_calc_sectors.append(sector_poly_calc)
-                            uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(sector_poly_calc)]
-    except: pass
+                            else:
+                                lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
+                                
+                                # Propose 3 sectors. First pointing to the center of bad RSRP (if offset), or just North
+                                if ns_pt.distance(centroid_3857) > 1:
+                                    base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
+                                else:
+                                    base_az = 0
+                                    
+                                azs = [base_az, (base_az + 120) % 360, (base_az + 240) % 360]
+                                
+                                new_site_key = f"new_{iteration}"
+                                current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'azimuths': azs}
+                                
+                                for az in azs:
+                                    poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200)
+                                    poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m)
+                                    
+                                    global_newsite.append(poly_viz)
+                                    global_calc_sectors.append(poly_calc)
+                                    global_additional.append(poly_viz)
+                                    
+                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
+                                    
+                        if len(uncovered_bad_spots) == previous_uncovered_len:
+                            print(f"DEBUG: No spots covered! Dropping cluster {largest_cluster} to avoid infinite loop.")
+                            uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"DEBUG EXCEPTION: {e}")
 
     opt_data = {
         'additional': gpd.GeoDataFrame(geometry=global_additional, crs="EPSG:3857"),
@@ -447,10 +472,8 @@ for apt in airports:
                 gdf = gpd.GeoDataFrame(
                     df_filtered, geometry=gpd.points_from_xy(df_filtered.Longitude, df_filtered.Latitude), crs="EPSG:4326"
                 )
-                
-                if src == 'MR':
-                    gdf = gpd.sjoin(gdf, gdf_territory_4326, how='inner', predicate='intersects')
                 gdf_3857 = gdf.to_crs(epsg=3857)
+                
                 size_m = 20 if src == 'MDT' else 50
                 avg_lat = gdf['Latitude'].mean()
                 size_units = size_m / math.cos(math.radians(avg_lat))
@@ -470,15 +493,27 @@ for apt in airports:
     combined_calc_poly = None
     from shapely.ops import unary_union
     if global_calc_sectors:
+        print(f"DEBUG: global_calc_sectors size: {len(global_calc_sectors)}")
         combined_calc_poly = unary_union(global_calc_sectors)
     
     airport_poly_3857 = apt['gdf_3857'].geometry.iloc[0]
+    print(f"DEBUG: processed_gdfs keys: {list(processed_gdfs.keys())}")
+    for k, v in processed_gdfs.items():
+        if v is not None:
+            print(f"DEBUG: {k} length: {len(v)}")
+        else:
+            print(f"DEBUG: {k} is None")
+    
     mr_dfs = {k.split('_')[1]: processed_gdfs.get(k) for k in processed_gdfs if 'MR' in k and 'RSRP' in k}
+    print(f"DEBUG: mr_dfs keys: {list(mr_dfs.keys())}")
     for dsrc, dname in [('Combine', 'Combine'), ('Indoor', 'Indoor')]:
         gdf_src = mr_dfs.get(dsrc)
-        if gdf_src is None or gdf_src.empty: continue
+        if gdf_src is None or gdf_src.empty: 
+            print(f"DEBUG: {dsrc} is None or empty in mr_dfs")
+            continue
         gdf_src_3857 = gdf_src.to_crs(epsg=3857)
         total_spots = len(gdf_src_3857[gdf_src_3857.geometry.within(airport_poly_3857)])
+        print(f"DEBUG: {dsrc} total_spots within polygon: {total_spots}")
         if total_spots == 0: continue
         bad_spots_gdf = gdf_src_3857[(gdf_src_3857.geometry.within(airport_poly_3857)) & (gdf_src_3857[val_cols['RSRP']] < -105)]
         bad_count = len(bad_spots_gdf)
@@ -486,6 +521,7 @@ for apt in airports:
         after_pct = before_pct
         if combined_calc_poly and bad_count > 0:
             covered_bad = len(bad_spots_gdf[bad_spots_gdf.geometry.within(combined_calc_poly)])
+            print(f"DEBUG: {dname} covered_bad: {covered_bad} out of {bad_count} bad spots")
             after_pct = (total_spots - bad_count + covered_bad) / total_spots * 100
         coverage_stats[dname] = {'before': before_pct, 'after': after_pct}
     print("Coverage Stats:", coverage_stats)
@@ -500,12 +536,17 @@ for apt in airports:
             mr_gdf = processed_gdfs.get(mr_key)
             mdt_gdf = processed_gdfs.get(f"{metric}_{env}_MDT")
             
-            no_data = True
-            if mr_gdf is not None and not mr_gdf.empty: no_data = False
-            if mdt_gdf is not None and not mdt_gdf.empty: no_data = False
+            no_mr = True
+            no_mdt = True
+            if mr_gdf is not None and not mr_gdf.empty: no_mr = False
+            if mdt_gdf is not None and not mdt_gdf.empty: no_mdt = False
             
-            if no_data:
-                fig.text(0.5, 0.5, "MR/MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+            if no_mr and no_mdt:
+                fig.text(0.5, 0.5, "MR & MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+            elif no_mr:
+                fig.text(0.5, 0.5, "MR not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+            elif no_mdt:
+                fig.text(0.5, 0.5, "MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
             
             titles = ['Map', f'MR {metric}', f'MDT {metric}']
             

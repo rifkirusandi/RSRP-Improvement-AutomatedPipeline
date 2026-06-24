@@ -4,8 +4,9 @@ This tool automates the process of optimizing 4G/LTE cell site coverage (RSRP an
 
 ## Features
 - **Spatial Coverage Analysis**: Parses GeoJSON/CSV coordinate data for both MR (Measurement Reports) and MDT to map RSRP and RSRQ metrics in real-time.
-- **Dynamic Optimization Engine**: Identifies spatial clusters of "bad spots" (RSRP < -105 dBm) inside the target boundary using the DBSCAN algorithm.
+- **Dynamic Optimization Engine**: Identifies spatial clusters of "bad spots" (RSRP < -105 dBm) inside the target boundary using the DBSCAN algorithm. Attempts to reach 100% coverage thresholds while strictly respecting distance rules.
 - **Strict Morphological Constraints**: Uses MapInfo Clutter (`.TAB`) to automatically enforce terrain-specific inter-site distance (ISD) requirements (e.g., Dense Urban = 500m, Rural = 2000m) preventing sites from being proposed too close together. If a dead zone is encountered, it gracefully relaxes the ISD constraint dynamically down to a 500m minimum.
+- **Realistic Site Generation**: Automatically proposes new cell sites (equipped with 3 sectors) placed securely near the target bad spots. If no valid placement area respects the ISD, the area is skipped to prevent unrealistic overlapping site proposals.
 - **Automated Report Generation**: Stitches beautifully formatted Matplotlib subplot comparisons (Before vs After) directly into high-quality PowerPoint presentations (`.pptx`) with dynamic tables summarizing the quantitative improvements.
 
 ## Prerequisites

@@ -3,6 +3,7 @@ import math
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+from openpyxl.styles import Alignment, Font
 from shapely.geometry import Polygon, Point
 from shapely.ops import nearest_points
 from sklearn.cluster import DBSCAN
@@ -32,8 +33,8 @@ os.makedirs(OUT_DIR, exist_ok=True)
 
 CLUTTER_RADII = {
     'DENSE URBAN': 400,
-    'URBAN': 600,
     'SUB URBAN': 1000,
+    'URBAN': 600,
     'RURAL': 1500
 }
 DEFAULT_RADIUS = 600
@@ -61,7 +62,7 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-
+    if 'Kulon Progo' not in airport_name and 'Komodo' not in airport_name: continue
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")
@@ -82,6 +83,8 @@ for shape_rec in sf.iterShapeRecords():
     })
 
 print(f"Found {len(airports)} airports matching criteria.")
+
+global_all_proposals = []
 
 print("Loading Territory Shapefile...")
 sf_terr = shapefile.Reader(TERRITORY_PATH)
@@ -132,6 +135,11 @@ except Exception as e:
     print(f"Error loading global clutter: {e}")
     global_clutter_gdf = gpd.GeoDataFrame()
 
+def snap_azimuth(azimuth):
+    if pd.isna(azimuth): return 0
+    az = int(round(azimuth / 5.0) * 5)
+    return az % 360
+
 def get_sector_polygon(cx_m, cy_m, lat, azimuth, radius_m=200, angle_deg=65):
     if pd.isna(azimuth): azimuth = 0
     r_units = radius_m / math.cos(math.radians(lat))
@@ -180,7 +188,7 @@ def calculate_bearing(lon1, lat1, lon2, lat2):
     y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1) * math.cos(lat2) * math.cos(dlon))
     initial_bearing = math.atan2(x, y)
     initial_bearing = math.degrees(initial_bearing)
-    return (initial_bearing + 360) % 360
+    return snap_azimuth((initial_bearing + 360) % 360)
 
 def is_valid_azimuth(new_az, existing_azs, min_gap=90):
     for az in existing_azs:
@@ -203,7 +211,7 @@ def get_best_azimuths(site_pt_3857, radius_m, existing_azimuths, bad_spots_3857,
         while len(azimuths) < max_sectors:
             best_count = -1
             best_az = -1
-            for a in range(360):
+            for a in range(0, 360, 5):
                 if not is_valid_azimuth(a, azimuths, 90): continue
                 diff = np.abs(bearings - a)
                 diff = np.minimum(diff, 360 - diff)
@@ -223,7 +231,7 @@ def get_best_azimuths(site_pt_3857, radius_m, existing_azimuths, bad_spots_3857,
                 
     while len(azimuths) < max_sectors:
         for offset in [120, 240, 90, 180, 270]:
-            candidate = (azimuths[0] + offset) % 360
+            candidate = snap_azimuth((azimuths[0] + offset) % 360)
             if is_valid_azimuth(candidate, azimuths, 90):
                 azimuths.append(candidate)
                 break
@@ -254,6 +262,8 @@ for apt in airports:
     # Store site states
     # site_id -> {'x': x, 'y': y, 'lat': lat, 'azimuths': []}
     sites_info = {}
+    airport_proposals = []
+    new_site_count = 1
     
     gdf_cells_3857 = gpd.GeoDataFrame()
     if len(df_cells_apt) > 0:
@@ -265,7 +275,7 @@ for apt in airports:
         for idx, row in gdf_cells_3857.iterrows():
             site_key = f"{row.geometry.x}_{row.geometry.y}"
             if site_key not in sites_info:
-                sites_info[site_key] = {'x': row.geometry.x, 'y': row.geometry.y, 'lat': row['Latitude'], 'azimuths': []}
+                sites_info[site_key] = {'x': row.geometry.x, 'y': row.geometry.y, 'lat': row['Latitude'], 'site_id': row.get('Site ID', 'EXISTING_SITE'), 'azimuths': []}
             if not pd.isna(row['Azimuth']):
                 sites_info[site_key]['azimuths'].append(row['Azimuth'])
             sectors.append(get_sector_polygon(row.geometry.x, row.geometry.y, row['Latitude'], row['Azimuth'], radius_m=200))
@@ -284,15 +294,15 @@ for apt in airports:
     except Exception as e:
         print(" Clutter loading error:", e)
 
-    def get_clutter_radius(pt_3857):
+    def get_clutter_info(pt_3857):
         if len(clutter_gdf) > 0:
             intersecting = clutter_gdf[clutter_gdf.contains(pt_3857)]
             if not intersecting.empty:
                 morpho = str(intersecting.iloc[0].get('Morpho', '')).strip().upper()
                 for key, radius in CLUTTER_RADII.items():
                     if key in morpho:
-                        return radius
-        return DEFAULT_RADIUS
+                        return radius, key
+        return DEFAULT_RADIUS, 'UNKNOWN' 
         
     def is_inside_clutter(pt_3857):
         """Check if a point falls inside the clutter map (i.e. on land, not ocean)"""
@@ -368,7 +378,7 @@ for apt in airports:
                         centroid_3857 = Point(cx_c, cy_c)
                         lon_c, lat_c = transformer_to_4326.transform(cx_c, cy_c)
                         
-                        radius_m = get_clutter_radius(centroid_3857)
+                        radius_m, morpho = get_clutter_info(centroid_3857)
                         sector_poly_calc = None
                         
                         placed = False
@@ -416,10 +426,22 @@ for apt in airports:
                             else:
                                 base_az = 0
                                 
-                            azs = [base_az, (base_az + 120) % 360, (base_az + 240) % 360]
+                            azs = [snap_azimuth(base_az), snap_azimuth(base_az + 120), snap_azimuth(base_az + 240)]
                             
                             new_site_key = f"new_{iteration}"
-                            current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'azimuths': azs}
+                            dummy_site_id = f"{name.upper().replace(' ', '_')}_ARPT_{new_site_count:03d}"
+                            new_site_count += 1
+                            current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'site_id': dummy_site_id, 'azimuths': azs}
+                            
+                            for az in azs:
+                                airport_proposals.append({
+                                    'Site ID': dummy_site_id,
+                                    'Longitude': lon_ns,
+                                    'Latitude': lat_ns,
+                                    'Azimuth': az,
+                                    'Clutter': morpho,
+                                    'Radius': radius_m
+                                })
                             
                             for az in azs:
                                 poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200)
@@ -453,6 +475,14 @@ for apt in airports:
                                 azimuth = calculate_bearing(lon_s, lat_s, lon_c, lat_c)
                                 if is_valid_azimuth(azimuth, s_info['azimuths'], 90):
                                     s_info['azimuths'].append(azimuth)
+                                    airport_proposals.append({
+                                        'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
+                                        'Longitude': lon_s,
+                                        'Latitude': lat_s,
+                                        'Azimuth': azimuth,
+                                        'Clutter': morpho,
+                                        'Radius': radius_m
+                                    })
                                     sector_poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], azimuth, radius_m=radius_m)
                                     sector_poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], azimuth, radius_m=200)
                                     global_additional.append(sector_poly_viz)
@@ -761,5 +791,26 @@ for apt in airports:
     out_pptx = os.path.join(OUT_DIR, f"{name}_Airport_Improvement.pptx")
     prs.save(out_pptx)
     print(f"Saved {out_pptx}")
+    
+    # --- ACCUMULATE EXCEL PROPOSALS ---
+    if airport_proposals:
+        global_all_proposals.extend(airport_proposals)
+
+# --- EXPORT COMBINED EXCEL REPORT ---
+if global_all_proposals:
+    df_proposals = pd.DataFrame(global_all_proposals)
+    excel_path = os.path.join(OUT_DIR, "All_Airports_Proposals.xlsx")
+    with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
+        df_proposals.to_excel(writer, index=False, sheet_name='Proposals')
+        worksheet = writer.sheets['Proposals']
+        
+        # Center contents and bold headers
+        for row in worksheet.iter_rows():
+            for cell in row:
+                cell.alignment = Alignment(horizontal='center')
+        
+        for cell in worksheet[1]:
+            cell.font = Font(bold=True)
+    print(f"Saved Combined Excel report to {excel_path}")
 
 print("PPTX generated successfully!")

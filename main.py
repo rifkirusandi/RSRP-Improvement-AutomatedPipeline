@@ -61,7 +61,7 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-    if 'Kulon Progo' not in airport_name: continue
+    if 'Kulon Progo' not in airport_name and 'Komodo' not in airport_name: continue
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")
@@ -324,8 +324,10 @@ for apt in airports:
                 airport_poly_3857 = apt['gdf_3857'].geometry.iloc[0]
                 airport_exterior = airport_poly_3857.exterior
                 
-                # Calculation happens inside polygon ONLY
-                pts_inside = gdf_in[gdf_in.geometry.within(airport_poly_4326)]
+                # Calculation happens inside buffered polygon
+                airport_poly_3857_buffered = airport_poly_3857.buffer(300)
+                airport_poly_4326_buffered = gpd.GeoSeries([airport_poly_3857_buffered], crs="EPSG:3857").to_crs(epsg=4326).iloc[0]
+                pts_inside = gdf_in[gdf_in.geometry.within(airport_poly_4326_buffered)]
                 bad_spots = pts_inside[pts_inside['RSRP(All MRs) (dBm)'] < -105].copy()
                 total_pts_in_airport = len(pts_inside)
                 

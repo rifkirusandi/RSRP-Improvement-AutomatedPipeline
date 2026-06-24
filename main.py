@@ -31,12 +31,12 @@ OUT_DIR = "Output"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 CLUTTER_RADII = {
-    'DENSE URBAN': 500,
-    'URBAN': 1000,
-    'SUB URBAN': 2000,
-    'RURAL': 5000
+    'DENSE URBAN': 400,
+    'URBAN': 600,
+    'SUB URBAN': 1000,
+    'RURAL': 1500
 }
-DEFAULT_RADIUS = 500
+DEFAULT_RADIUS = 600
 
 def get_ordinal_suffix(day):
     if 11 <= day <= 13: return 'th'
@@ -61,7 +61,7 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-    if 'Kulon Progo' not in airport_name and 'Komodo' not in airport_name: continue
+
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")
@@ -294,6 +294,14 @@ for apt in airports:
                         return radius
         return DEFAULT_RADIUS
         
+    def is_inside_clutter(pt_3857):
+        """Check if a point falls inside the clutter map (i.e. on land, not ocean)"""
+        if len(clutter_gdf) > 0:
+            # Use spatial index for fast lookup
+            possible_matches_idx = list(clutter_gdf.sindex.query(pt_3857, predicate='intersects'))
+            return len(possible_matches_idx) > 0
+        return True  # If no clutter loaded, allow placement
+    
     def get_isd_min(pt_3857):
         if len(clutter_gdf) > 0:
             intersecting = clutter_gdf[clutter_gdf.contains(pt_3857)]
@@ -372,18 +380,23 @@ for apt in airports:
                         while ns_pt is None and relaxation <= 1500:
                             current_isd = max(500, cluster_isd_base - relaxation)
                             
-                            # Try centroid first
+                            # Try centroid first (must be inside clutter map)
                             too_close = False
-                            for s_info in current_sites_info.values():
-                                if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
-                                    too_close = True
-                                    break
+                            if not is_inside_clutter(centroid_3857):
+                                too_close = True  # Not on land, skip
+                            else:
+                                for s_info in current_sites_info.values():
+                                    if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
+                                        too_close = True
+                                        break
                             
                             if not too_close:
                                 ns_pt = centroid_3857
                             else:
-                                # Find another point in the cluster that respects ISD
+                                # Find another point in the cluster that respects ISD AND is inside clutter
                                 for geom in cluster_pts.geometry:
+                                    if not is_inside_clutter(geom):
+                                        continue  # Skip points outside clutter (ocean etc)
                                     too_close = False
                                     for s_info in current_sites_info.values():
                                         if geom.distance(Point(s_info['x'], s_info['y'])) < current_isd:
@@ -537,6 +550,51 @@ for apt in airports:
             after_pct = (total_spots - bad_count + covered_bad) / total_spots * 100
         coverage_stats[dname] = {'before': before_pct, 'after': after_pct}
     print("Coverage Stats:", coverage_stats)
+
+    # --- EVIDENCE PLOT ---
+    if 'Combine' in mr_dfs and mr_dfs['Combine'] is not None and len(global_calc_sectors) > 0:
+        # Add 30% padding around the airport bounds so nothing is cut off
+        dx = xmax - xmin
+        dy = ymax - ymin
+        pad_x = dx * 0.3
+        pad_y = dy * 0.3
+        
+        fig_ev, ax_ev = plt.subplots(figsize=(14, 12), dpi=150)
+        ax_ev.set_xlim(xmin - pad_x, xmax + pad_x)
+        ax_ev.set_ylim(ymin - pad_y, ymax + pad_y)
+        ax_ev.axis('off')
+        ax_ev.set_title(f"Coverage Evidence - {name}\nBlue = Proposed Sector Footprint | Red = Original Bad RSRP Spots", fontweight='bold', fontsize=14)
+        cx.add_basemap(ax_ev, crs="EPSG:3857", source=cx.providers.CartoDB.Positron, attribution=False)
+        
+        # Plot airport boundary
+        apt['gdf_3857'].plot(ax=ax_ev, facecolor='none', edgecolor='black', linewidth=2.5, linestyle='--', label='Airport Polygon')
+        
+        # Plot raw bad spots FIRST (underneath)
+        gdf_ev = mr_dfs['Combine'].to_crs(epsg=3857)
+        bad_spots_ev = gdf_ev[(gdf_ev.geometry.within(airport_poly_3857)) & (gdf_ev[val_cols['RSRP']] < -105)]
+        bad_spots_ev.plot(ax=ax_ev, color='red', markersize=8, alpha=0.9, zorder=5, label=f'Bad RSRP Spots ({len(bad_spots_ev)})')
+        
+        # Plot the theoretical calculated footprints ON TOP
+        calc_gdf = gpd.GeoDataFrame(geometry=global_calc_sectors, crs="EPSG:3857")
+        calc_gdf.plot(ax=ax_ev, facecolor='dodgerblue', edgecolor='navy', alpha=0.25, linewidth=0.8, zorder=4, label=f'Sector Footprint ({len(calc_gdf)} sectors)')
+        
+        # Plot the proposed new site sectors
+        if len(opt_data['newsite']) > 0:
+            opt_data['newsite'].plot(ax=ax_ev, facecolor='purple', edgecolor='black', alpha=0.9, linewidth=1, zorder=6, label=f'New Site Sectors ({len(opt_data["newsite"])})')
+        if len(opt_data['additional']) > 0:
+            opt_data['additional'].plot(ax=ax_ev, facecolor='yellow', edgecolor='black', alpha=0.9, linewidth=1, zorder=6, label=f'Additional Sectors ({len(opt_data["additional"])})')
+        
+        # Plot existing site sectors
+        if len(gdf_sectors) > 0:
+            gdf_sectors.plot(ax=ax_ev, facecolor='orange', edgecolor='black', alpha=0.5, linewidth=0.5, zorder=3, label=f'Existing Sectors ({len(gdf_sectors)})')
+            
+        ax_ev.legend(loc='lower left', fontsize=10, framealpha=0.9)
+        evidence_path = os.path.join("Evidence", f"{name}_Coverage_Evidence.png")
+        plt.savefig(evidence_path, bbox_inches='tight')
+        plt.close(fig_ev)
+        print(f"Saved Evidence plot to {evidence_path}")
+    # ---------------------
+
 
     img_paths = {}
     for metric in ['RSRP', 'RSRQ']:

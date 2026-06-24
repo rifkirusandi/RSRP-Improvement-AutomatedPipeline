@@ -5,9 +5,9 @@ This tool automates the process of optimizing 4G/LTE cell site coverage (RSRP an
 ## Features
 - **Spatial Coverage Analysis**: Parses GeoJSON/CSV coordinate data for both MR (Measurement Reports) and MDT to map RSRP and RSRQ metrics in real-time.
 - **Dynamic Optimization Engine**: Identifies spatial clusters of "bad spots" (RSRP < -105 dBm) inside the target boundary using the DBSCAN algorithm. Attempts to reach 100% coverage thresholds while strictly respecting distance rules.
-- **Strict Morphological Constraints**: Uses MapInfo Clutter (`.TAB`) to automatically enforce terrain-specific inter-site distance (ISD) requirements (e.g., Dense Urban = 500m, Rural = 2000m) preventing sites from being proposed too close together. If a dead zone is encountered, it gracefully relaxes the ISD constraint dynamically down to a 500m minimum.
-- **Realistic Site Generation**: Automatically proposes new cell sites (equipped with 3 sectors) placed securely near the target bad spots. If no valid placement area respects the ISD, the area is skipped to prevent unrealistic overlapping site proposals.
-- **Automated Report Generation**: Stitches beautifully formatted Matplotlib subplot comparisons (Before vs After) directly into high-quality PowerPoint presentations (`.pptx`) with dynamic tables summarizing the quantitative improvements.
+- **Strict Morphological Constraints**: Uses MapInfo Clutter (`.TAB`) to automatically enforce terrain-specific inter-site distance (ISD) requirements (e.g., Dense Urban = 500m, Rural = 2000m) preventing sites from being proposed too close together. It also dynamically sets sector footprints based on clutter type (`Dense Urban: 400m, Urban: 600m, Sub Urban: 1000m, Rural: 1500m`).
+- **Realistic Site Generation**: Automatically proposes new cell sites (equipped with 3 sectors) placed securely near the target bad spots. A robust spatial index boundary check guarantees sites are never proposed over oceans or unmapped clutter areas. If no valid placement area respects the ISD, the area is safely skipped.
+- **Automated Report Generation**: Generates detailed `Evidence` plot visualizations with base maps (OpenStreetMap), sector footprints, and bad spots. Stitches beautifully formatted Matplotlib subplot comparisons (Before vs After) directly into high-quality PowerPoint presentations (`.pptx`) with dynamic tables summarizing the quantitative improvements.
 
 ## Prerequisites
 - Python 3.8+

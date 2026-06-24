@@ -62,7 +62,6 @@ target_bbox = None
 for shape_rec in sf.iterShapeRecords():
     rec_dict = dict(zip(field_names, shape_rec.record))
     airport_name = rec_dict.get('Airport', 'Unknown').strip().replace('\\', '')
-    if 'Kulon Progo' not in airport_name and 'Komodo' not in airport_name: continue
     
     poly = Polygon(shape_rec.shape.points)
     gdf = gpd.GeoDataFrame(geometry=[poly], crs="EPSG:3857")

@@ -363,15 +363,19 @@ for apt in airports:
                             candidates = [airport_exterior.interpolate(i/num_points, normalized=True) for i in range(max(1, num_points))]
                             
                             valid_candidates = []
-                            for cand in candidates:
-                                too_close = False
-                                cand_isd = get_isd_min(cand)
-                                for s_info in current_sites_info.values():
-                                    if cand.distance(Point(s_info['x'], s_info['y'])) < cand_isd:
-                                        too_close = True
-                                        break
-                                if not too_close:
-                                    valid_candidates.append(cand)
+                            relaxation = 0
+                            while not valid_candidates and relaxation <= 1500:
+                                for cand in candidates:
+                                    too_close = False
+                                    cand_isd = max(500, get_isd_min(cand) - relaxation)
+                                    for s_info in current_sites_info.values():
+                                        if cand.distance(Point(s_info['x'], s_info['y'])) < cand_isd:
+                                            too_close = True
+                                            break
+                                    if not too_close:
+                                        valid_candidates.append(cand)
+                                if not valid_candidates:
+                                    relaxation += 100
                                     
                             if valid_candidates:
                                 ns_pt = min(valid_candidates, key=lambda p: p.distance(centroid_3857))

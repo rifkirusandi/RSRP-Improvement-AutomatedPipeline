@@ -325,12 +325,14 @@ function renderMap() {
 
     // Draw MR/MDT Data if 'NONE' is not selected
     if (currentMetric !== 'NONE') {
-        const dataKey = `${currentMetric}_${currentEnv}_${currentSource}`;
-        const dataPoints = airport.data[dataKey] || [];
+        let dataPoints = [];
+        if (airport.mr_data && airport.mr_data[currentEnv] && airport.mr_data[currentEnv][currentSource]) {
+            dataPoints = airport.mr_data[currentEnv][currentSource][currentMetric] || [];
+        }
 
         dataPoints.forEach(pt => {
             let color = '#2ecc71'; // Default good
-            let val = pt.v;
+            let val = pt.val;
             
             if (currentMetric === 'RSRP') {
                 if (val < -115) color = '#FF0000';

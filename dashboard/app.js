@@ -166,7 +166,7 @@ function openEditor(site, isMarkerClick = false) {
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
-        document.getElementById('azimuth-slider').disabled = isMarkerClick; // Cant rotate marker, only sector
+        document.getElementById('azimuth-slider').disabled = isMarkerClick || site.remark === 'Change Antenna'; // Cant rotate marker or changed antenna
         document.getElementById('existing-site-actions').style.display = 'none';
     }
 }
@@ -180,7 +180,7 @@ function setupEditorListeners() {
     document.getElementById('editor-close').addEventListener('click', closeEditor);
     
     document.getElementById('azimuth-slider').addEventListener('input', (e) => {
-        if (!selectedSite || selectedSite.isMarkerClick) return;
+        if (!selectedSite || selectedSite.isMarkerClick || selectedSite.remark === 'Change Antenna') return;
         selectedSite.azimuth = parseInt(e.target.value);
         document.getElementById('azimuth-val').innerText = selectedSite.azimuth;
         renderMap();

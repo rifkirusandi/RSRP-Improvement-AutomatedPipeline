@@ -379,7 +379,7 @@ function setupEditorListeners() {
     document.getElementById('btn-add-sector').addEventListener('click', () => {
         if (!selectedSite || selectedSite.type !== 'existing') return;
         
-        const useHighGain = confirm("Do you want to use a High Gain Antenna?\n\nOK = High Gain (+20% radius, 33° beamwidth)\nCancel = Standard Antenna (Normal radius, 65° beamwidth)");
+        const useHighGain = false; // Default to normal antenna, user can toggle later
         
         const initialAzimuth = (selectedSite.azimuth + 120) % 360;
         const newSector = {

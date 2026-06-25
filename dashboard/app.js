@@ -209,7 +209,7 @@ function setupEditorListeners() {
         
         const payload = {
             airport: currentAirport,
-            bbox: aptData.bounds,
+            bbox: aptData.bbox || aptData.bounds,
             sites: allSites
         };
         
@@ -235,9 +235,10 @@ function renderMap() {
     
     // Auto center
     if (!editedStateChanged) { // Only set view if we just switched airport
+        const bbox = airport.bbox || airport.bounds;
         const bounds = [
-            [airport.bounds[1], airport.bounds[0]],
-            [airport.bounds[3], airport.bounds[2]]
+            [bbox[1], bbox[0]],
+            [bbox[3], bbox[2]]
         ];
         map.fitBounds(bounds, { padding: [20, 20] });
     }

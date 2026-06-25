@@ -232,7 +232,8 @@ function setupEditorListeners() {
             // Toggle new site in-place
             selectedSite.isHighGain = !selectedSite.isHighGain;
             selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
-            selectedSite.radius_m = selectedSite.isHighGain ? (600 * 1.2) : 600; // default base is 600
+            let baseRadius = selectedSite.clutter_radius || 600;
+            selectedSite.radius_m = selectedSite.isHighGain ? (baseRadius * 1.2) : baseRadius;
             selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
             
             markEdited();
@@ -353,13 +354,33 @@ function setupEditorListeners() {
         const prefix = currentAirport ? currentAirport.toUpperCase().replace(/\s+/g, '_') : 'SITE';
         const siteId = prefix + '_' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
         
+        const lat = pendingNewSiteLatLng.lat;
+        const lon = pendingNewSiteLatLng.lng;
+        
+        let nearestDist = Infinity;
+        let inferredClutterRadius = 600;
+        
+        const aptData = DASHBOARD_DATA[currentAirport];
+        if (aptData && aptData.sites) {
+            aptData.sites.forEach(s => {
+                if (s.type === 'existing') {
+                    let d = getDistance(lat, lon, s.lat, s.lon);
+                    if (d < nearestDist) {
+                        nearestDist = d;
+                        inferredClutterRadius = s.clutter_radius || 600;
+                    }
+                }
+            });
+        }
+        
         for(let i = 0; i < numSectors; i++) {
             const newSector = {
                 id: siteId,
-                lat: pendingNewSiteLatLng.lat,
-                lon: pendingNewSiteLatLng.lng,
+                lat: lat,
+                lon: lon,
                 azimuth: azimuths[i],
-                radius_m: 600, // Default to urban
+                radius_m: inferredClutterRadius,
+                clutter_radius: inferredClutterRadius,
                 beamwidth: 65,
                 remark: 'New Site',
                 type: 'proposed_new',

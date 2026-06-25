@@ -230,10 +230,15 @@ function setupEditorListeners() {
     document.getElementById('btn-change-antenna').addEventListener('click', () => {
         if (!selectedSite) return;
         
-        if (selectedSite.type === 'proposed_new') {
-            // Toggle new site in-place
+        if (selectedSite.type === 'proposed_new' || selectedSite.remark === 'Additional Sector') {
+            // Toggle new site or additional sector in-place
             selectedSite.isHighGain = !selectedSite.isHighGain;
-            selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
+            
+            if (selectedSite.type === 'proposed_new') {
+                selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
+            }
+            // For Additional Sector, the remark stays 'Additional Sector', but visual is determined by isHighGain
+            
             let baseRadius = selectedSite.clutter_radius || 600;
             selectedSite.radius_m = selectedSite.isHighGain ? (baseRadius * 1.2) : baseRadius;
             selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
@@ -282,6 +287,7 @@ function setupEditorListeners() {
             azimuth: targetAzimuth,
             original_azimuth: targetAzimuth,
             radius_m: (selectedSite.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
+            clutter_radius: selectedSite.clutter_radius || 600,
             beamwidth: 33,
             remark: 'Change Antenna',
             type: 'proposed_sector',
@@ -305,6 +311,8 @@ function setupEditorListeners() {
             lon: selectedSite.lon,
             azimuth: (selectedSite.azimuth + 120) % 360,
             radius_m: useHighGain ? ((selectedSite.clutter_radius || 600) * 1.2) : (selectedSite.clutter_radius || 600),
+            clutter_radius: selectedSite.clutter_radius || 600,
+            isHighGain: useHighGain,
             beamwidth: useHighGain ? 33 : 65,
             remark: 'Additional Sector',
             type: 'proposed_sector',
@@ -599,19 +607,19 @@ function renderMap(forceCenter = false) {
             // Support both array [lon,lat,val] and object {lon,lat,val} format
             let pt = Array.isArray(raw) ? {lon: raw[0], lat: raw[1], val: raw[2]} : raw;
             let color = '#2ecc71'; // Default good
-            let val = pt.val;
+            let val = parseFloat(pt.val);
             
             if (currentMetric === 'RSRP') {
-                if (val < -105) color = '#e74c3c'; // Poor
+                if (val <= -105) color = '#e74c3c'; // Poor
                 else color = '#2ecc71'; // Good
             } else if (currentMetric === 'RSRQ') {
-                if (val < -15) color = '#e74c3c';
+                if (val <= -15) color = '#e74c3c';
                 else if (val < -12) color = '#f1c40f';
                 else color = '#2ecc71';
             }
             
             // Apply After Implementation Logic
-            if (currentImplState === 'after' && currentMetric === 'RSRP' && val < -105) {
+            if (currentImplState === 'after' && currentMetric === 'RSRP' && val <= -105) {
                 // Check if covered by any proposed sector (including custom ones)
                 let covered = false;
                 for (let site of activeSites) {
@@ -634,7 +642,7 @@ function renderMap(forceCenter = false) {
                     }
                 }
                 if (covered) {
-                    color = '#92D050'; // Improved!
+                    color = '#2ecc71'; // Improved to new good green!
                 }
             }
 

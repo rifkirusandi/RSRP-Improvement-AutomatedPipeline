@@ -498,7 +498,7 @@ for apt in airports:
                                     placed = True
                             
                             # 1B: Change Antenna (If MACRO/IBC2M)
-                            if not placed and site_type in ['MACRO', 'IBC2M']:
+                            if not placed and site_type in ['MACRO', 'IBC2M'] and not closest_site_key.startswith('new_'):
                                 # Check if any existing sector points to the cluster
                                 for i_az, az in enumerate(list(s_info['azimuths'])):
                                     diff = abs(bearing_to_cluster - az)

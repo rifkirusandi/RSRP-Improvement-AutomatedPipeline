@@ -588,11 +588,8 @@ function renderMap(forceCenter = false) {
             let val = pt.val;
             
             if (currentMetric === 'RSRP') {
-                if (val < -115) color = '#FF0000';
-                else if (val < -110) color = '#FFC000';
-                else if (val < -105) color = '#FFFF00';
-                else if (val < -95) color = '#92D050';
-                else color = '#00B050';
+                if (val < -105) color = '#e74c3c'; // Poor
+                else color = '#2ecc71'; // Good
             } else if (currentMetric === 'RSRQ') {
                 if (val < -15) color = '#e74c3c';
                 else if (val < -12) color = '#f1c40f';

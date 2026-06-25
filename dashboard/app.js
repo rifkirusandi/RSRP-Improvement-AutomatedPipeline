@@ -145,13 +145,18 @@ function openEditor(site) {
     document.getElementById('azimuth-slider').value = site.azimuth;
     document.getElementById('azimuth-val').innerText = site.azimuth;
     
-    let remarkSelect = document.getElementById('remark-select');
-    remarkSelect.value = site.remark;
+    let remarkInput = document.getElementById('remark-input');
+    if (remarkInput) {
+        document.getElementById('remark-group').style.display = 'block';
+        remarkInput.value = site.type === 'existing' ? 'Existing' : site.remark;
+    }
+    
     if (site.type === 'existing') {
-        remarkSelect.value = 'Existing';
         document.getElementById('btn-delete-site').style.display = 'none'; // Cant delete existing
+        document.getElementById('azimuth-slider').disabled = true; // Cant rotate existing here
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
+        document.getElementById('azimuth-slider').disabled = false;
     }
 }
 
@@ -206,6 +211,7 @@ function setupEditorListeners() {
     
 
     document.getElementById('btn-add-new-site').addEventListener('click', () => {
+        alert("Please click anywhere on the map to place the new site.");
         document.getElementById('map').style.cursor = 'crosshair';
         map.once('click', function(e) {
             document.getElementById('map').style.cursor = '';
@@ -285,21 +291,16 @@ function renderMap() {
     // Draw Sites & Sectors
     activeSites.forEach(site => {
         // Draw sector
-        let radius = 200; // default viz radius
+        let radius = 250; // standard viz radius for fans
         let beamwidth = site.beamwidth || 65;
         let fillColor = (site.type === 'existing') ? 'orange' : (site.type === 'proposed_new' ? 'purple' : (site.remark === 'Change Antenna' ? 'cyan' : 'yellow'));
         
-        if (currentImplState === 'after' && site.type !== 'existing') {
-             // In after state, proposed sectors show their full predictive range
-             radius = site.radius_m || 600;
-        }
-
         const polygonPoints = getSectorPolygon([site.lat, site.lon], radius, site.azimuth, beamwidth);
         const sector = L.polygon(polygonPoints, {
             color: 'black',
             weight: 1,
             fillColor: fillColor,
-            fillOpacity: (currentImplState === 'after' && site.type !== 'existing') ? 0.3 : 0.6
+            fillOpacity: 0.6
         }).addTo(sectorLayerGroup);
         
         sector.on('click', function(e) {

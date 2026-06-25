@@ -163,14 +163,24 @@ for airport_name, data in airports.items():
             mask_q = (df_rsrq['Longitude'] >= minx) & (df_rsrq['Longitude'] <= maxx) & (df_rsrq['Latitude'] >= miny) & (df_rsrq['Latitude'] <= maxy)
             df_rsrq = df_rsrq[mask_q]
             
-            # BEFORE STATE: Only bad spots
-            df_rsrp_bad = df_rsrp[df_rsrp[val_cols['RSRP']] < -105]
-            df_rsrq_bad = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15]
+            # BEFORE STATE: Only bad spots, grid sampled to their scale to avoid overlap
+            df_rsrp_bad = df_rsrp[df_rsrp[val_cols['RSRP']] < -105].copy()
+            df_rsrq_bad = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15].copy()
             
-            for _, row in df_rsrp_bad.iterrows():
-                data['mr_data'][env][source]['RSRP_before'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRP']], 1)])
-            for _, row in df_rsrq_bad.iterrows():
-                data['mr_data'][env][source]['RSRQ_before'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRQ']], 1)])
+            grid_size = 0.00045 if source == 'MR' else 0.00018
+            if len(df_rsrp_bad) > 0:
+                df_rsrp_bad['grid_lon'] = (df_rsrp_bad['Longitude'] / grid_size).round() * grid_size
+                df_rsrp_bad['grid_lat'] = (df_rsrp_bad['Latitude'] / grid_size).round() * grid_size
+                df_rsrp_bad = df_rsrp_bad.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRP']].mean().reset_index()
+                for _, row in df_rsrp_bad.iterrows():
+                    data['mr_data'][env][source]['RSRP_before'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRP']], 1)])
+            
+            if len(df_rsrq_bad) > 0:
+                df_rsrq_bad['grid_lon'] = (df_rsrq_bad['Longitude'] / grid_size).round() * grid_size
+                df_rsrq_bad['grid_lat'] = (df_rsrq_bad['Latitude'] / grid_size).round() * grid_size
+                df_rsrq_bad = df_rsrq_bad.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRQ']].mean().reset_index()
+                for _, row in df_rsrq_bad.iterrows():
+                    data['mr_data'][env][source]['RSRQ_before'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRQ']], 1)])
                 
             # AFTER STATE: 250m Grid average (0.0022 degrees)
             df_rsrp['grid_lon'] = (df_rsrp['Longitude'] / 0.0022).round() * 0.0022

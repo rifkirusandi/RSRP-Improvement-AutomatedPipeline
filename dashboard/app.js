@@ -67,6 +67,8 @@ function initMap() {
 function markEdited() {
     editedStateChanged = true;
     document.getElementById('save-banner').style.display = 'flex';
+    document.getElementById('impl-toggle').checked = true;
+    currentImplState = 'after';
 }
 
 function populateAirportDropdown() {
@@ -426,11 +428,12 @@ function setupEditorListeners() {
                 tlp_id: 'N/A',
                 tlp_name: 'N/A'
             };
-            customSites.push(newSector);
+            customSites.added.push(newSector);
         }
         
         document.getElementById('new-site-modal').style.display = 'none';
         pendingNewSiteLatLng = null;
+        
         markEdited();
         renderMap();
     });

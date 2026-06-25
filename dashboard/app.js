@@ -9,8 +9,8 @@ let map;
 let mrLayerGroup = L.layerGroup();
 let siteLayerGroup = L.layerGroup();
 let sectorLayerGroup = L.layerGroup();
-let customSitesMap = {}; // { 'AirportName': [customSites array] }
-let customSites = []; // Holds user-added/edited proposals for the current airport
+let customSitesMap = {}; // { 'AirportName': { added: [], deleted: [], modified: {} } }
+let customSites = { added: [], deleted: [], modified: {} }; // Active diff for current airport
 let editedStateChanged = false;
 let selectedSite = null;
 let pendingNewSiteLatLng = null;
@@ -57,7 +57,7 @@ function initMap() {
             tlp_name: 'N/A'
         };
         
-        customSites.push(newSite);
+        customSites.added.push(newSite);
         markEdited();
         renderMap();
         openEditor(newSite);
@@ -87,9 +87,9 @@ function populateAirportDropdown() {
         if (currentAirport) customSitesMap[currentAirport] = customSites;
         
         currentAirport = e.target.value;
-        customSites = customSitesMap[currentAirport] || [];
+        customSites = customSitesMap[currentAirport] || { added: [], deleted: [], modified: {} };
         
-        editedStateChanged = customSites.length > 0;
+        editedStateChanged = customSites.added.length > 0 || customSites.deleted.length > 0 || Object.keys(customSites.modified).length > 0;
         document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
         closeEditor();
         renderMap(true);
@@ -186,8 +186,23 @@ function setupEditorListeners() {
     
     document.getElementById('azimuth-slider').addEventListener('input', (e) => {
         if (!selectedSite || selectedSite.isMarkerClick || selectedSite.remark === 'Change Antenna') return;
+        
+        let aptData = DASHBOARD_DATA[currentAirport];
+        if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
+            if (selectedSite.original_azimuth === undefined) {
+                selectedSite.original_azimuth = selectedSite.azimuth;
+            }
+        }
+        
         selectedSite.azimuth = parseInt(e.target.value);
         document.getElementById('azimuth-val').innerText = selectedSite.azimuth;
+        
+        if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
+            const sig = `${selectedSite.id}_${selectedSite.original_azimuth}`;
+            if (!customSites.modified[sig]) customSites.modified[sig] = {};
+            customSites.modified[sig].azimuth = selectedSite.azimuth;
+        }
+        
         renderMap();
         markEdited();
     });
@@ -197,23 +212,27 @@ function setupEditorListeners() {
     document.getElementById('btn-delete-site').addEventListener('click', () => {
         if (!selectedSite) return;
         
+        let aptData = DASHBOARD_DATA[currentAirport];
+        
         if (selectedSite.isMarkerClick) {
-            // Remove ALL sectors with this site ID from customSites
-            customSites = customSites.filter(s => s.id !== selectedSite.id);
+            // Remove ALL sectors with this site ID from customSites.added
+            customSites.added = customSites.added.filter(s => s.id !== selectedSite.id);
             
-            // Remove ALL sectors with this site ID from DASHBOARD_DATA
-            let aptData = DASHBOARD_DATA[currentAirport];
+            // Mark ALL base sectors with this site ID as deleted
             if (aptData && aptData.sites) {
-                aptData.sites = aptData.sites.filter(s => s.id !== selectedSite.id);
+                aptData.sites.forEach(s => {
+                    if (s.id === selectedSite.id) {
+                        customSites.deleted.push(`${s.id}_${s.azimuth}`);
+                    }
+                });
             }
         } else {
-            // Remove ONLY this sector from customSites
-            customSites = customSites.filter(s => s !== selectedSite);
+            // Remove ONLY this sector from customSites.added
+            customSites.added = customSites.added.filter(s => s !== selectedSite);
             
-            // Remove ONLY this sector from DASHBOARD_DATA
-            let aptData = DASHBOARD_DATA[currentAirport];
-            if (aptData && aptData.sites) {
-                aptData.sites = aptData.sites.filter(s => s !== selectedSite);
+            // Mark this specific base sector as deleted
+            if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
+                customSites.deleted.push(`${selectedSite.id}_${selectedSite.azimuth}`);
             }
         }
         
@@ -230,6 +249,8 @@ function setupEditorListeners() {
     document.getElementById('btn-change-antenna').addEventListener('click', () => {
         if (!selectedSite) return;
         
+        let aptData = DASHBOARD_DATA[currentAirport];
+        
         if (selectedSite.type === 'proposed_new' || selectedSite.remark === 'Additional Sector') {
             // Toggle new site or additional sector in-place
             selectedSite.isHighGain = !selectedSite.isHighGain;
@@ -237,11 +258,20 @@ function setupEditorListeners() {
             if (selectedSite.type === 'proposed_new') {
                 selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
             }
-            // For Additional Sector, the remark stays 'Additional Sector', but visual is determined by isHighGain
             
             let baseRadius = selectedSite.clutter_radius || 600;
             selectedSite.radius_m = selectedSite.isHighGain ? (baseRadius * 1.2) : baseRadius;
             selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
+            
+            if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
+                if (selectedSite.original_azimuth === undefined) selectedSite.original_azimuth = selectedSite.azimuth;
+                const sig = `${selectedSite.id}_${selectedSite.original_azimuth}`;
+                if (!customSites.modified[sig]) customSites.modified[sig] = {};
+                customSites.modified[sig].isHighGain = selectedSite.isHighGain;
+                customSites.modified[sig].remark = selectedSite.remark;
+                customSites.modified[sig].radius_m = selectedSite.radius_m;
+                customSites.modified[sig].beamwidth = selectedSite.beamwidth;
+            }
             
             markEdited();
             renderMap();
@@ -252,7 +282,7 @@ function setupEditorListeners() {
         // It's an existing site or proposed_sector (which includes "Change Antenna" sector)
         if (selectedSite.remark === 'Change Antenna') {
             // Revert back to normal
-            customSites = customSites.filter(s => s !== selectedSite);
+            customSites.added = customSites.added.filter(s => s !== selectedSite);
             markEdited();
             renderMap();
             closeEditor();
@@ -264,7 +294,6 @@ function setupEditorListeners() {
         let targetAzimuth = selectedSite.azimuth;
         
         // Find ALL sectors for this site ID
-        const aptData = DASHBOARD_DATA[currentAirport];
         let allSectorsForSite = (aptData.sites || []).filter(s => s.id === selectedSite.id);
         
         if (selectedSite.isMarkerClick && allSectorsForSite.length > 1) {
@@ -294,7 +323,7 @@ function setupEditorListeners() {
             tlp_id: 'N/A',
             tlp_name: 'N/A'
         };
-        customSites.push(changedSite);
+        customSites.added.push(changedSite);
         markEdited();
         renderMap();
         closeEditor();
@@ -319,7 +348,7 @@ function setupEditorListeners() {
             tlp_id: 'N/A',
             tlp_name: 'N/A'
         };
-        customSites.push(newSector);
+        customSites.added.push(newSector);
         markEdited();
         renderMap();
         openEditor(newSector); // Switch editor to the new sector so they can adjust azimuth
@@ -451,26 +480,53 @@ function setupEditorListeners() {
         
         for (const aptName in DASHBOARD_DATA) {
             const aptData = DASHBOARD_DATA[aptName];
-            const aptCustomSites = customSitesMap[aptName] || [];
+            const aptCustom = customSitesMap[aptName] || { added: [], deleted: [], modified: {} };
             
-            if (!isAll && aptCustomSites.length === 0) continue; // Skip airports with no edits if they want edited only
+            const hasEdits = aptCustom.added.length > 0 || aptCustom.deleted.length > 0 || Object.keys(aptCustom.modified).length > 0;
+            if (!isAll && !hasEdits) continue; // Skip airports with no edits if they want edited only
             
             let sitesToExport = [];
             
             if (isAll) {
-                const replacedSignatures = aptCustomSites
-                    .filter(s => s.remark === 'Change Antenna')
-                    .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
+                // Apply diffs to base
+                (aptData.sites || []).forEach(s => {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
                     
-                let baseSites = (aptData.sites || []).filter(s => {
-                    const sig = `${s.id}_${s.azimuth}`;
-                    return !replacedSignatures.includes(sig);
+                    if (aptCustom.deleted && aptCustom.deleted.includes(sig)) return;
+                    
+                    const replacedByChange = aptCustom.added && aptCustom.added.some(add => 
+                        add.remark === 'Change Antenna' && add.id.replace('_CHG', '') === s.id && add.original_azimuth === baseAz
+                    );
+                    if (replacedByChange) return;
+                    
+                    let finalSite = { ...s, remark: s.remark || 'Existing' };
+                    if (aptCustom.modified && aptCustom.modified[sig]) {
+                        finalSite = { ...finalSite, ...aptCustom.modified[sig] };
+                    }
+                    sitesToExport.push(finalSite);
                 });
                 
-                baseSites = baseSites.map(s => ({...s, remark: s.remark || 'Existing'}));
-                sitesToExport = baseSites.concat(aptCustomSites);
+                if (aptCustom.added) {
+                    sitesToExport = sitesToExport.concat(aptCustom.added);
+                }
             } else {
-                sitesToExport = aptCustomSites;
+                // Only edited sites: meaning added and modified
+                if (aptCustom.added) {
+                    sitesToExport = sitesToExport.concat(aptCustom.added);
+                }
+                
+                // For modified sites, we need to pull them from base and apply the mod
+                (aptData.sites || []).forEach(s => {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
+                    
+                    if (aptCustom.modified && aptCustom.modified[sig]) {
+                        let finalSite = { ...s, remark: s.remark || 'Existing' };
+                        finalSite = { ...finalSite, ...aptCustom.modified[sig] };
+                        sitesToExport.push(finalSite);
+                    }
+                });
             }
             
             sitesToExport.forEach(site => {
@@ -524,13 +580,33 @@ function renderMap(forceCenter = false) {
     }
 
     // Determine all active sites (original + custom)
-    const replacedSignatures = customSites
-        .filter(s => s.remark === 'Change Antenna')
-        .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
-
-    let activeSites = (airport.sites || []).filter(s => {
-        return !replacedSignatures.includes(`${s.id}_${s.azimuth}`);
-    }).concat(customSites);
+    let activeSites = [];
+    (airport.sites || []).forEach(s => {
+        const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+        const sig = `${s.id}_${baseAz}`;
+        
+        // Skip if deleted
+        if (customSites.deleted && customSites.deleted.includes(sig)) return;
+        
+        // Skip if replaced by 'Change Antenna' in customSites.added
+        const replacedByChange = customSites.added && customSites.added.some(add => 
+            add.remark === 'Change Antenna' && add.id.replace('_CHG', '') === s.id && add.original_azimuth === baseAz
+        );
+        if (replacedByChange) return;
+        
+        // Apply modifications if any
+        let finalSite = { ...s };
+        if (customSites.modified && customSites.modified[sig]) {
+            finalSite = { ...finalSite, ...customSites.modified[sig] };
+        }
+        
+        activeSites.push(finalSite);
+    });
+    
+    // Append added sites
+    if (customSites.added) {
+        activeSites = activeSites.concat(customSites.added);
+    }
     
     // Draw Sites & Sectors
     activeSites.forEach(site => {

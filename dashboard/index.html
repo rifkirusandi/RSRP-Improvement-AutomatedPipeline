@@ -59,6 +59,10 @@
                 <input type="radio" name="metric" value="NONE"> Map Only
             </label>
         </div>
+        
+        <div style="margin-top: 15px;">
+            <button id="btn-add-new-site" style="width: 100%; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; padding: 10px; font-size: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">+ Add New Site</button>
+        </div>
 
         
 
@@ -76,7 +80,7 @@
     </div>
 
     <!-- Right Editor Panel -->
-    <div id="editor-panel" class="glass-panel" style="display: none; position: absolute; right: 20px; top: 120px; z-index: 1000; width: 300px; padding: 20px; border-radius: 12px;">
+    <div id="editor-panel" class="glass-panel" style="display: none; position: absolute; right: 20px; bottom: 20px; top: auto; z-index: 1000; width: 320px; padding: 20px; border-radius: 12px;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
             <h3 id="editor-title" style="margin: 0;">Edit Site</h3>
             <span id="editor-close" style="cursor: pointer; font-size: 20px; line-height: 1;">&times;</span>
@@ -87,13 +91,9 @@
             <input type="range" id="azimuth-slider" min="0" max="359" value="0" style="width: 100%;">
         </div>
         
-        <div class="control-group" style="margin-top: 15px;">
+        <div class="control-group" style="margin-top: 15px; display: none;" id="remark-group">
             <label>Sector Type / Remark</label>
-            <select id="remark-select" style="width: 100%; margin-top: 5px;">
-                <option value="New Site">New Site</option>
-                <option value="Additional Sector">Additional Sector</option>
-                <option value="Change Antenna">Change Antenna (High Gain)</option>
-            </select>
+            <input type="text" id="remark-input" disabled style="width: 100%; margin-top: 5px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px; border-radius: 6px;">
         </div>
         
         <div style="margin-top: 20px; display: flex; gap: 10px;">

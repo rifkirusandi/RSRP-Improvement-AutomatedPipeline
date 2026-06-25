@@ -12,6 +12,46 @@ OUT_JSON = r"dashboard\dashboard_data.js"
 
 os.makedirs("dashboard", exist_ok=True)
 
+import fiona
+from shapely.geometry import Point
+
+CLUTTER_PATH = r"C:\Request\Airport Improvement\Clutter\Morphology Indonesia V4.TAB"
+CLUTTER_RADII = {
+    'DENSE URBAN': 400,
+    'SUB URBAN': 1000,
+    'URBAN': 600,
+    'RURAL': 2000
+}
+global_clutter_gdf = gpd.GeoDataFrame()
+try:
+    with fiona.open(CLUTTER_PATH) as src:
+        features = list(src)
+        if features:
+            geoms = [Polygon(f['geometry']['coordinates'][0]) if f['geometry']['type'] == 'Polygon' else Point(0,0) for f in features if f['geometry'] is not None]
+            # Actually fiona geometry can be directly passed to shapely.geometry.shape
+            from shapely.geometry import shape
+            geoms = [shape(f['geometry']) for f in features if f['geometry'] is not None]
+            props = [f['properties'] for f in features if f['geometry'] is not None]
+            global_clutter_gdf = gpd.GeoDataFrame(props, geometry=geoms, crs=src.crs).to_crs(epsg=4326)
+            # Create spatial index
+            _ = global_clutter_gdf.sindex
+except Exception as e:
+    print(f"Error loading clutter: {e}")
+
+def get_clutter_radius(lon, lat):
+    if global_clutter_gdf.empty: return 600
+    pt = Point(lon, lat)
+    possible_matches_idx = list(global_clutter_gdf.sindex.query(pt, predicate='intersects'))
+    if len(possible_matches_idx) > 0:
+        intersecting = global_clutter_gdf.iloc[possible_matches_idx]
+        morpho = str(intersecting.iloc[0].get('Morpho', '')).strip().upper()
+        for key, radius in CLUTTER_RADII.items():
+            if key in morpho:
+                return radius
+    return 600
+
+
+
 # Load Airports
 print("Loading Shapefiles...")
 import shapefile
@@ -35,12 +75,12 @@ for shape_rec in sf.iterShapeRecords():
         'sites': [],
         'mr_data': {
             'Combine': {
-                'MR': {'RSRP': [], 'RSRQ': []},
-                'MDT': {'RSRP': [], 'RSRQ': []}
+                'MR': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []},
+                'MDT': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []}
             },
             'Indoor': {
-                'MR': {'RSRP': [], 'RSRQ': []},
-                'MDT': {'RSRP': [], 'RSRQ': []}
+                'MR': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []},
+                'MDT': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []}
             }
         }
     }
@@ -73,6 +113,7 @@ for airport_name, data in airports.items():
             'lon': round(float(row['Longitude']), 5),
             'lat': round(float(row['Latitude']), 5),
             'azimuth': round(float(row.get('Azimuth', 0)), 0),
+            'clutter_radius': get_clutter_radius(float(row['Longitude']), float(row['Latitude'])),
             'type': 'existing'
         })
         
@@ -105,9 +146,8 @@ for airport_name, data in airports.items():
         })
 
         
-    # Load MR/MDT Data - AGGRESSIVELY DOWNSAMPLE to keep file small
+    # Load MR/MDT Data with Grid Sampling for After, and Bad Spots for Before
     val_cols = {'RSRP': 'RSRP(All MRs) (dBm)', 'RSRQ': 'RSRQ(All MRs) (dB)'}
-    MAX_POINTS_PER_METRIC = 2000  # Reduced from 10000 to 2000
     
     for env in ['Combine', 'Indoor']:
         for source, r_val in [('MR', 25), ('MDT', 10)]:
@@ -123,16 +163,28 @@ for airport_name, data in airports.items():
             mask_q = (df_rsrq['Longitude'] >= minx) & (df_rsrq['Longitude'] <= maxx) & (df_rsrq['Latitude'] >= miny) & (df_rsrq['Latitude'] <= maxy)
             df_rsrq = df_rsrq[mask_q]
             
-            # Aggressive downsampling
-            if len(df_rsrp) > MAX_POINTS_PER_METRIC: df_rsrp = df_rsrp.sample(MAX_POINTS_PER_METRIC, random_state=42)
-            if len(df_rsrq) > MAX_POINTS_PER_METRIC: df_rsrq = df_rsrq.sample(MAX_POINTS_PER_METRIC, random_state=42)
+            # BEFORE STATE: Only bad spots
+            df_rsrp_bad = df_rsrp[df_rsrp[val_cols['RSRP']] < -105]
+            df_rsrq_bad = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15]
             
-            # Use compact array format: [lon, lat, val] instead of {"lon":, "lat":, "val":, "r":}
-            for _, row in df_rsrp.iterrows():
-                data['mr_data'][env][source]['RSRP'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRP']], 1)])
+            for _, row in df_rsrp_bad.iterrows():
+                data['mr_data'][env][source]['RSRP_before'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRP']], 1)])
+            for _, row in df_rsrq_bad.iterrows():
+                data['mr_data'][env][source]['RSRQ_before'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRQ']], 1)])
                 
-            for _, row in df_rsrq.iterrows():
-                data['mr_data'][env][source]['RSRQ'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRQ']], 1)])
+            # AFTER STATE: 250m Grid average (0.0022 degrees)
+            df_rsrp['grid_lon'] = (df_rsrp['Longitude'] / 0.0022).round() * 0.0022
+            df_rsrp['grid_lat'] = (df_rsrp['Latitude'] / 0.0022).round() * 0.0022
+            df_rsrp_grid = df_rsrp.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRP']].mean().reset_index()
+            
+            df_rsrq['grid_lon'] = (df_rsrq['Longitude'] / 0.0022).round() * 0.0022
+            df_rsrq['grid_lat'] = (df_rsrq['Latitude'] / 0.0022).round() * 0.0022
+            df_rsrq_grid = df_rsrq.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRQ']].mean().reset_index()
+            
+            for _, row in df_rsrp_grid.iterrows():
+                data['mr_data'][env][source]['RSRP_after'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRP']], 1)])
+            for _, row in df_rsrq_grid.iterrows():
+                data['mr_data'][env][source]['RSRQ_after'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRQ']], 1)])
             
     # Remove polygon object to make it JSON serializable
     del data['polygon']

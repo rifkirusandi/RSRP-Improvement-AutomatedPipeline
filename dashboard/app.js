@@ -204,6 +204,40 @@ function setupEditorListeners() {
         closeEditor();
     });
     
+
+    document.getElementById('btn-add-new-site').addEventListener('click', () => {
+        document.getElementById('map').style.cursor = 'crosshair';
+        map.once('click', function(e) {
+            document.getElementById('map').style.cursor = '';
+            
+            const numSectors = prompt("How many sectors?", "3");
+            if (!numSectors) return;
+            const siteId = prompt("Enter Site ID (e.g. NEW_01):", "NEW_01");
+            if (!siteId) return;
+            
+            for(let i = 0; i < parseInt(numSectors); i++) {
+                let az = parseInt(prompt(`Azimuth for Sector ${i+1}?`, (i * 120) % 360));
+                if (isNaN(az)) continue;
+                
+                const newSector = {
+                    id: siteId,
+                    lat: e.latlng.lat,
+                    lon: e.latlng.lng,
+                    azimuth: az,
+                    radius_m: 600, // Default to urban
+                    beamwidth: 65,
+                    remark: 'New Site',
+                    type: 'proposed_new',
+                    tlp_id: 'N/A',
+                    tlp_name: 'N/A'
+                };
+                customSites.push(newSector);
+            }
+            markEdited();
+            renderMap();
+        });
+    });
+
     document.getElementById('btn-trigger-save').addEventListener('click', () => {
         const aptData = DASHBOARD_DATA[currentAirport];
         let allSites = [];
@@ -267,6 +301,29 @@ function renderMap() {
             fillColor: fillColor,
             fillOpacity: (currentImplState === 'after' && site.type !== 'existing') ? 0.3 : 0.6
         }).addTo(sectorLayerGroup);
+        
+        sector.on('click', function(e) {
+            if (site.type === 'existing') {
+                const changedSite = {
+                    id: site.id + "_CHG",
+                    lat: site.lat,
+                    lon: site.lon,
+                    azimuth: site.azimuth,
+                    radius_m: (site.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
+                    beamwidth: 33,
+                    remark: 'Change Antenna',
+                    type: 'proposed_sector',
+                    tlp_id: 'N/A',
+                    tlp_name: 'N/A'
+                };
+                customSites.push(changedSite);
+                markEdited();
+                renderMap();
+                openEditor(changedSite);
+            } else {
+                openEditor(site);
+            }
+        });
 
         // Draw marker
         let markerClass = 'existing';
@@ -299,28 +356,26 @@ function renderMap() {
         });
         
         marker.on('click', function(e) {
-            openEditor(site);
-        });
-        
-        // Right click an existing site to add a sector
-        marker.on('contextmenu', function(e) {
             if (site.type === 'existing') {
+                // Click on the point of existing sites to add a new fan (new sector)
                 const newSector = {
                     id: site.id + "_ADD",
                     lat: site.lat,
                     lon: site.lon,
                     azimuth: (site.azimuth + 120) % 360,
-                    radius_m: 600,
+                    radius_m: site.clutter_radius || 600, // 3GPP Clutter standard
                     beamwidth: 65,
                     remark: 'Additional Sector',
                     type: 'proposed_sector',
                     tlp_id: 'N/A',
                     tlp_name: 'N/A'
                 };
-                activeSites.push(newSector);
+                customSites.push(newSector);
                 markEdited();
                 renderMap();
                 openEditor(newSector);
+            } else {
+                openEditor(site);
             }
         });
     });
@@ -329,7 +384,8 @@ function renderMap() {
     if (currentMetric !== 'NONE') {
         let dataPoints = [];
         if (airport.mr_data && airport.mr_data[currentEnv] && airport.mr_data[currentEnv][currentSource]) {
-            dataPoints = airport.mr_data[currentEnv][currentSource][currentMetric] || [];
+            const metricKey = currentMetric + '_' + currentImplState;
+            dataPoints = airport.mr_data[currentEnv][currentSource][metricKey] || [];
         }
 
         dataPoints.forEach(raw => {
@@ -378,8 +434,8 @@ function renderMap() {
                 }
             }
 
-            L.circleMarker([pt.lat, pt.lon], {
-                radius: currentSource === 'MDT' ? 5 : 3,
+            L.circle([pt.lat, pt.lon], {
+                radius: currentSource === 'MDT' ? 20 : 50,
                 fillColor: color,
                 color: color,
                 weight: 1,

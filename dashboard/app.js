@@ -167,8 +167,11 @@ function openEditor(site, isMarkerClick = false) {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
         document.getElementById('azimuth-slider').disabled = isMarkerClick || site.remark === 'Change Antenna'; // Cant rotate marker or changed antenna
-        document.getElementById('existing-site-actions').style.display = 'none';
+        document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
     }
+    
+    let isHighGain = site.remark === 'Change Antenna' || site.isHighGain;
+    document.getElementById('btn-change-antenna').innerText = isHighGain ? "Revert Normal Antenna" : "Toggle High Gain";
 }
 
 function closeEditor() {
@@ -223,7 +226,32 @@ function setupEditorListeners() {
     
 
     document.getElementById('btn-change-antenna').addEventListener('click', () => {
-        if (!selectedSite || selectedSite.type !== 'existing') return;
+        if (!selectedSite) return;
+        
+        if (selectedSite.type === 'proposed_new') {
+            // Toggle new site in-place
+            selectedSite.isHighGain = !selectedSite.isHighGain;
+            selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
+            selectedSite.radius_m = selectedSite.isHighGain ? (600 * 1.2) : 600; // default base is 600
+            selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
+            
+            markEdited();
+            renderMap();
+            openEditor(selectedSite); // refresh editor UI
+            return;
+        }
+
+        // It's an existing site or proposed_sector (which includes "Change Antenna" sector)
+        if (selectedSite.remark === 'Change Antenna') {
+            // Revert back to normal
+            customSites = customSites.filter(s => s !== selectedSite);
+            markEdited();
+            renderMap();
+            closeEditor();
+            return;
+        }
+        
+        if (selectedSite.type !== 'existing') return; // Guard
         
         let targetAzimuth = selectedSite.azimuth;
         
@@ -433,7 +461,13 @@ function renderMap(forceCenter = false) {
     }
 
     // Determine all active sites (original + custom)
-    let activeSites = (airport.sites || []).concat(customSites);
+    const replacedSignatures = customSites
+        .filter(s => s.remark === 'Change Antenna')
+        .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
+
+    let activeSites = (airport.sites || []).filter(s => {
+        return !replacedSignatures.includes(`${s.id}_${s.azimuth}`);
+    }).concat(customSites);
     
     // Draw Sites & Sectors
     activeSites.forEach(site => {
@@ -443,11 +477,13 @@ function renderMap(forceCenter = false) {
         let radius = 250; // standard viz radius for fans
         let beamwidth = site.beamwidth || 65;
         let fillColor = (site.type === 'existing') ? '#3498db' : ((site.type === 'proposed_new') ? '#000000' : '#9b59b6');
+        let isHighGain = site.remark === 'Change Antenna' || site.isHighGain;
         
         const polygonPoints = getSectorPolygon([site.lat, site.lon], radius, site.azimuth, beamwidth);
         const sector = L.polygon(polygonPoints, {
-            color: 'black',
-            weight: 1,
+            color: isHighGain ? '#ffffff' : 'black',
+            weight: isHighGain ? 2 : 1,
+            dashArray: isHighGain ? '5, 5' : null,
             fillColor: fillColor,
             fillOpacity: 0.8
         }).addTo(sectorLayerGroup);

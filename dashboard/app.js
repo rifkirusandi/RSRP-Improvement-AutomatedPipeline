@@ -251,7 +251,7 @@ function renderMap() {
         // Draw sector
         let radius = 200; // default viz radius
         let beamwidth = site.beamwidth || 65;
-        let fillColor = (site.type === 'existing') ? 'orange' : (site.type === 'proposed_new' ? 'purple' : 'yellow');
+        let fillColor = (site.type === 'existing') ? 'orange' : (site.type === 'proposed_new' ? 'purple' : (site.remark === 'Change Antenna' ? 'cyan' : 'yellow'));
         
         if (currentImplState === 'after' && site.type !== 'existing') {
              // In after state, proposed sectors show their full predictive range

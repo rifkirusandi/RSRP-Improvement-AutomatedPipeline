@@ -305,22 +305,41 @@ function renderMap() {
         
         sector.on('click', function(e) {
             if (site.type === 'existing') {
-                const changedSite = {
-                    id: site.id + "_CHG",
-                    lat: site.lat,
-                    lon: site.lon,
-                    azimuth: site.azimuth,
-                    radius_m: (site.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
-                    beamwidth: 33,
-                    remark: 'Change Antenna',
-                    type: 'proposed_sector',
-                    tlp_id: 'N/A',
-                    tlp_name: 'N/A'
-                };
-                customSites.push(changedSite);
-                markEdited();
-                renderMap();
-                openEditor(changedSite);
+                const choice = prompt("Type '1' to Change Antenna (cyan, narrow, longer). Type '2' to Add Sector (adjustable azimuth, standard radius).", "1");
+                if (choice === '1') {
+                    const changedSite = {
+                        id: site.id + "_CHG",
+                        lat: site.lat,
+                        lon: site.lon,
+                        azimuth: site.azimuth,
+                        radius_m: (site.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
+                        beamwidth: 33,
+                        remark: 'Change Antenna',
+                        type: 'proposed_sector',
+                        tlp_id: 'N/A',
+                        tlp_name: 'N/A'
+                    };
+                    customSites.push(changedSite);
+                    markEdited();
+                    renderMap();
+                } else if (choice === '2') {
+                    const newSector = {
+                        id: site.id + "_ADD",
+                        lat: site.lat,
+                        lon: site.lon,
+                        azimuth: (site.azimuth + 120) % 360,
+                        radius_m: site.clutter_radius || 600, // 3GPP Clutter standard
+                        beamwidth: 65,
+                        remark: 'Additional Sector',
+                        type: 'proposed_sector',
+                        tlp_id: 'N/A',
+                        tlp_name: 'N/A'
+                    };
+                    customSites.push(newSector);
+                    markEdited();
+                    renderMap();
+                    openEditor(newSector); // Open editor so they can adjust azimuth
+                }
             } else {
                 openEditor(site);
             }
@@ -357,27 +376,7 @@ function renderMap() {
         });
         
         marker.on('click', function(e) {
-            if (site.type === 'existing') {
-                // Click on the point of existing sites to add a new fan (new sector)
-                const newSector = {
-                    id: site.id + "_ADD",
-                    lat: site.lat,
-                    lon: site.lon,
-                    azimuth: (site.azimuth + 120) % 360,
-                    radius_m: site.clutter_radius || 600, // 3GPP Clutter standard
-                    beamwidth: 65,
-                    remark: 'Additional Sector',
-                    type: 'proposed_sector',
-                    tlp_id: 'N/A',
-                    tlp_name: 'N/A'
-                };
-                customSites.push(newSector);
-                markEdited();
-                renderMap();
-                openEditor(newSector);
-            } else {
-                openEditor(site);
-            }
+            openEditor(site);
         });
     });
 

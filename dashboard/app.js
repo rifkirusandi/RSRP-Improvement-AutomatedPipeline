@@ -276,7 +276,7 @@ function renderMap() {
     }
 
     // Determine all active sites (original + custom)
-    let activeSites = airport.sites || [];
+    let activeSites = (airport.sites || []).concat(customSites);
     
     // Draw Sites & Sectors
     activeSites.forEach(site => {

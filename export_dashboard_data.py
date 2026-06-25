@@ -12,7 +12,7 @@ OUT_JSON = r"dashboard\dashboard_data.js"
 
 os.makedirs("dashboard", exist_ok=True)
 
-# Load Airports (Komodo & Kulon Progo)
+# Load Airports
 print("Loading Shapefiles...")
 import shapefile
 sf = shapefile.Reader(SHP_PATH)
@@ -30,7 +30,7 @@ for shape_rec in sf.iterShapeRecords():
     
     airports[name] = {
         'name': name,
-        'bbox': [minx, miny, maxx, maxy],
+        'bbox': [round(minx, 5), round(miny, 5), round(maxx, 5), round(maxy, 5)],
         'polygon': poly, # 3857 poly
         'sites': [],
         'mr_data': {
@@ -70,9 +70,9 @@ for airport_name, data in airports.items():
     for _, row in df_cells[mask_ex].iterrows():
         data['sites'].append({
             'id': str(row.get('Site ID', '')),
-            'lon': float(row['Longitude']),
-            'lat': float(row['Latitude']),
-            'azimuth': float(row.get('Azimuth', 0)),
+            'lon': round(float(row['Longitude']), 5),
+            'lat': round(float(row['Latitude']), 5),
+            'azimuth': round(float(row.get('Azimuth', 0)), 0),
             'type': 'existing'
         })
         
@@ -95,17 +95,19 @@ for airport_name, data in airports.items():
         
         data['sites'].append({
             'id': site_id,
-            'lon': float(row['Longitude']),
-            'lat': float(row['Latitude']),
-            'azimuth': float(row.get('Azimuth', 0)),
-            'radius_m': radius_m,
+            'lon': round(float(row['Longitude']), 5),
+            'lat': round(float(row['Latitude']), 5),
+            'azimuth': round(float(row.get('Azimuth', 0)), 0),
+            'radius_m': round(radius_m, 0),
             'beamwidth': beamwidth,
+            'remark': remark,
             'type': 'proposed_new' if is_new else 'proposed_sector'
         })
 
         
-    # Load MR/MDT Data
+    # Load MR/MDT Data - AGGRESSIVELY DOWNSAMPLE to keep file small
     val_cols = {'RSRP': 'RSRP(All MRs) (dBm)', 'RSRQ': 'RSRQ(All MRs) (dB)'}
+    MAX_POINTS_PER_METRIC = 2000  # Reduced from 10000 to 2000
     
     for env in ['Combine', 'Indoor']:
         for source, r_val in [('MR', 25), ('MDT', 10)]:
@@ -121,27 +123,26 @@ for airport_name, data in airports.items():
             mask_q = (df_rsrq['Longitude'] >= minx) & (df_rsrq['Longitude'] <= maxx) & (df_rsrq['Latitude'] >= miny) & (df_rsrq['Latitude'] <= maxy)
             df_rsrq = df_rsrq[mask_q]
             
-            # Sample if too large
-            if len(df_rsrp) > 10000: df_rsrp = df_rsrp.sample(10000, random_state=42)
-            if len(df_rsrq) > 10000: df_rsrq = df_rsrq.sample(10000, random_state=42)
+            # Aggressive downsampling
+            if len(df_rsrp) > MAX_POINTS_PER_METRIC: df_rsrp = df_rsrp.sample(MAX_POINTS_PER_METRIC, random_state=42)
+            if len(df_rsrq) > MAX_POINTS_PER_METRIC: df_rsrq = df_rsrq.sample(MAX_POINTS_PER_METRIC, random_state=42)
             
+            # Use compact array format: [lon, lat, val] instead of {"lon":, "lat":, "val":, "r":}
             for _, row in df_rsrp.iterrows():
-                data['mr_data'][env][source]['RSRP'].append({'lon': round(row['Longitude'], 5), 'lat': round(row['Latitude'], 5), 'val': round(row[val_cols['RSRP']], 1), 'r': r_val})
+                data['mr_data'][env][source]['RSRP'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRP']], 1)])
                 
             for _, row in df_rsrq.iterrows():
-                data['mr_data'][env][source]['RSRQ'].append({'lon': round(row['Longitude'], 5), 'lat': round(row['Latitude'], 5), 'val': round(row[val_cols['RSRQ']], 1), 'r': r_val})
+                data['mr_data'][env][source]['RSRQ'].append([round(row['Longitude'], 5), round(row['Latitude'], 5), round(row[val_cols['RSRQ']], 1)])
             
     # Remove polygon object to make it JSON serializable
     del data['polygon']
 
-OUT_JSON = r"dashboard\dashboard_data.js"
-
-# ... inside script ...
-
+# Compact JSON output (no whitespace)
 print(f"Exporting to {OUT_JSON}...")
 with open(OUT_JSON, 'w') as f:
-    f.write("const dashboardDataRaw = ")
-    json.dump(airports, f)
+    f.write("const DASHBOARD_DATA = ")
+    json.dump(airports, f, separators=(',', ':'))
     f.write(";")
 
-print("Export complete!")
+size_mb = os.path.getsize(OUT_JSON) / (1024*1024)
+print(f"Export complete! File size: {size_mb:.1f} MB")

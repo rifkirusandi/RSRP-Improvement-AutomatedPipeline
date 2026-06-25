@@ -332,7 +332,9 @@ function renderMap() {
             dataPoints = airport.mr_data[currentEnv][currentSource][currentMetric] || [];
         }
 
-        dataPoints.forEach(pt => {
+        dataPoints.forEach(raw => {
+            // Support both array [lon,lat,val] and object {lon,lat,val} format
+            let pt = Array.isArray(raw) ? {lon: raw[0], lat: raw[1], val: raw[2]} : raw;
             let color = '#2ecc71'; // Default good
             let val = pt.val;
             

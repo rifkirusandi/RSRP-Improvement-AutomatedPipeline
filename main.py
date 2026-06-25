@@ -126,6 +126,11 @@ try:
         r_airports.append(r_name)
     gdf_runways = gpd.GeoDataFrame({'Airport': r_airports, 'geometry': r_polys}, crs="EPSG:4326")
     gdf_runways_3857 = gdf_runways.to_crs(epsg=3857)
+    # The shapefile is a 150m buffer on each side (300m total width).
+    # Real runway width is ~45-60m. Shrink by applying -120m negative buffer.
+    gdf_runways_3857['geometry'] = gdf_runways_3857.geometry.buffer(-120)
+    gdf_runways_3857 = gdf_runways_3857[~gdf_runways_3857.is_empty]
+    print(f"  Runway polygons shrunk to ~60m realistic width ({len(gdf_runways_3857)} remaining)")
 except Exception as e:
     print(f"Error loading runway shapefile manually: {e}")
     gdf_runways_3857 = gpd.GeoDataFrame(columns=['Airport', 'geometry'])
@@ -385,11 +390,11 @@ for apt in airports:
             intersecting = clutter_gdf[clutter_gdf.contains(pt_3857)]
             if not intersecting.empty:
                 morpho = str(intersecting.iloc[0].get('Morpho', '')).strip().upper()
-                if 'DENSE URBAN' in morpho: return 800
-                elif 'SUB URBAN' in morpho: return 2000
-                elif 'URBAN' in morpho: return 1200
-                elif 'RURAL' in morpho: return 3000
-        return 1500 # default fallback
+                if 'DENSE URBAN' in morpho: return 500
+                elif 'SUB URBAN' in morpho: return 800
+                elif 'URBAN' in morpho: return 600
+                elif 'RURAL' in morpho: return 1200
+        return 800 # default fallback
         
     processed_gdfs = {}
     
@@ -590,14 +595,62 @@ for apt in airports:
                                 else:
                                     ns_pt = centroid_3857
                             
-                            # Enforce ISD against all existing and newly placed sites
+                            # Enforce ISD against ALL sites (new + existing)
+                            # Adaptive: reduce ISD progressively down to 500m minimum
+                            # If still blocked, try shifting the site away from blocking site
                             if ns_pt is not None:
-                                min_req_isd = get_isd_min(ns_pt)
-                                for s_key, s_info in current_sites_info.items():
-                                    ex_pt = Point(s_info['x'], s_info['y'])
-                                    if ns_pt.distance(ex_pt) < min_req_isd:
-                                        ns_pt = None # Too close! Drop it.
-                                        break
+                                def find_isd_valid_point(candidate_pt):
+                                    """Try to find a valid point respecting ISD. First try in-place with reducing ISD, then try shifting."""
+                                    min_isd = get_isd_min(candidate_pt)
+                                    
+                                    # Phase 1: Try reducing ISD at the original location
+                                    test_isd = min_isd
+                                    while test_isd >= 500:
+                                        blocked_by = None
+                                        for s_key, s_info in current_sites_info.items():
+                                            ex_pt = Point(s_info['x'], s_info['y'])
+                                            d = candidate_pt.distance(ex_pt)
+                                            if d < test_isd:
+                                                blocked_by = (s_key, ex_pt, d)
+                                                break
+                                        if blocked_by is None:
+                                            return candidate_pt  # Valid!
+                                        test_isd -= 100
+                                    
+                                    # Phase 2: Shift away from the closest blocking site
+                                    # Try 8 compass directions at the minimum ISD distance (500m)
+                                    if blocked_by is not None:
+                                        _, blocker_pt, _ = blocked_by
+                                        import math
+                                        for angle_offset in [0, 45, 90, 135, 180, 225, 270, 315]:
+                                            # Direction from blocker to candidate, then offset
+                                            dx = candidate_pt.x - blocker_pt.x
+                                            dy = candidate_pt.y - blocker_pt.y
+                                            base_angle = math.atan2(dy, dx)
+                                            shift_angle = base_angle + math.radians(angle_offset)
+                                            shift_dist = 550  # Just beyond 500m ISD
+                                            
+                                            shifted_pt = Point(
+                                                blocker_pt.x + shift_dist * math.cos(shift_angle),
+                                                blocker_pt.y + shift_dist * math.sin(shift_angle)
+                                            )
+                                            
+                                            # Check this shifted point against ALL sites
+                                            all_ok = True
+                                            for s_key2, s_info2 in current_sites_info.items():
+                                                ex_pt2 = Point(s_info2['x'], s_info2['y'])
+                                                if shifted_pt.distance(ex_pt2) < 500:
+                                                    all_ok = False
+                                                    break
+                                            
+                                            # Also check it's still inside clutter/airport area
+                                            if all_ok and is_inside_clutter(shifted_pt) and not is_in_runway(shifted_pt):
+                                                print(f"DEBUG ISD: Shifted new site by {angle_offset}° to satisfy 500m ISD")
+                                                return shifted_pt
+                                    
+                                    return None  # Could not find valid location
+                                
+                                ns_pt = find_isd_valid_point(ns_pt)
                                     
                             if ns_pt is not None:
                                 lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
@@ -961,7 +1014,7 @@ for apt in airports:
         fill.solid()
         fill.fore_color.rgb = RGBColor(17, 17, 17)
         
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12), Inches(1))
+        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(12), Inches(1))
         tf = txBox.text_frame
         tf.word_wrap = True
         p = tf.add_paragraph()
@@ -973,7 +1026,9 @@ for apt in airports:
         
         img_path = img_paths.get(f"{metric}_{env}")
         if img_path and os.path.exists(img_path):
-            slide.shapes.add_picture(img_path, Inches(0.5), Inches(1.2), width=Inches(12.333))
+            # Center image vertically: image width=12.333, aspect ~3.7:1 -> height ~3.3"
+            # Slide height=7.5, so center at ~(7.5 - 3.3)/2 = 2.1, but account for title
+            slide.shapes.add_picture(img_path, Inches(0.5), Inches(2.0), width=Inches(12.333))
             os.remove(img_path)
 
     slide = prs.slides.add_slide(blank_layout)

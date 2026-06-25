@@ -22,7 +22,7 @@ function initMap() {
         contextmenu: true
     }).setView([-2.5489, 118.0149], 5);
     
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; CartoDB',
         maxZoom: 19
     }).addTo(map);
@@ -380,7 +380,7 @@ function renderMap() {
             color: 'black',
             weight: 1,
             fillColor: fillColor,
-            fillOpacity: 0.6
+            fillOpacity: 0.8
         }).addTo(sectorLayerGroup);
         
         sector.on('click', function(e) {
@@ -491,6 +491,9 @@ function renderMap() {
             }).addTo(mrLayerGroup);
         });
     }
+
+    // Ensure sectors and markers are drawn on top of the MR grid
+    sectorLayerGroup.eachLayer(layer => { if (layer.bringToFront) layer.bringToFront(); });
 }
 
 // Event Listeners

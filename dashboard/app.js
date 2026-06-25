@@ -158,7 +158,9 @@ function openEditor(site, isMarkerClick = false) {
     let remarkInput = document.getElementById('remark-input');
     if (remarkInput) {
         document.getElementById('remark-group').style.display = 'block';
-        remarkInput.value = site.type === 'existing' ? 'Existing' : site.remark;
+        let displayRemark = site.type === 'existing' ? 'Existing' : site.remark;
+        if (displayRemark === 'Change Antenna') displayRemark = 'High Gain Antenna';
+        remarkInput.value = displayRemark;
     }
     
     if (site.type === 'existing') {
@@ -683,6 +685,11 @@ function renderMap(forceCenter = false) {
             fillColor: fillColor,
             fillOpacity: 0.8
         }).addTo(sectorLayerGroup);
+        
+        let displayRemark = site.type === 'existing' ? 'Existing' : site.remark;
+        if (displayRemark === 'Change Antenna') displayRemark = 'High Gain Antenna';
+        let tooltipContent = `<b>${site.id}</b><br>Azimuth: ${site.azimuth}&deg;<br>Type: ${displayRemark}`;
+        sector.bindTooltip(tooltipContent, {direction: 'top'});
         
         sector.on('click', function(e) {
             openEditor(site);

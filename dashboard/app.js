@@ -462,7 +462,7 @@ function renderMap() {
             }
 
             L.circle([pt.lat, pt.lon], {
-                radius: currentSource === 'MDT' ? 20 : 50,
+                radius: currentSource === 'MDT' ? 10 : 25,
                 fillColor: color,
                 color: color,
                 weight: 1,

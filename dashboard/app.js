@@ -65,7 +65,7 @@ function initMap() {
 
 function markEdited() {
     editedStateChanged = true;
-    document.getElementById('save-banner').style.display = 'block';
+    document.getElementById('save-banner').style.display = 'flex';
 }
 
 function populateAirportDropdown() {
@@ -323,21 +323,59 @@ function setupEditorListeners() {
     });
 
     document.getElementById('btn-trigger-save').addEventListener('click', () => {
-        const aptData = DASHBOARD_DATA[currentAirport];
-        let allSites = [];
-        if (aptData && aptData.sites) allSites = aptData.sites;
-        
         const payload = {
             airport: currentAirport,
-            bbox: aptData.bbox || aptData.bounds,
-            sites: allSites
+            edited_sites: customSites
         };
         
         const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
         const dlAnchorElem = document.createElement('a');
         dlAnchorElem.setAttribute("href", dataStr);
-        dlAnchorElem.setAttribute("download", `Edits_${currentAirport.replace(/\s+/g, '_')}.json`);
+        dlAnchorElem.setAttribute("download", `Edits_Only_${currentAirport.replace(/\s+/g, '_')}.json`);
         dlAnchorElem.click();
+        
+        document.getElementById('save-banner').style.display = 'none';
+        editedStateChanged = false;
+    });
+
+    document.getElementById('btn-export-csv').addEventListener('click', () => {
+        const aptData = DASHBOARD_DATA[currentAirport];
+        if (!aptData) return;
+        
+        // Exclude base sites that were replaced by "Change Antenna"
+        const changedSiteIds = customSites.filter(s => s.remark === 'Change Antenna').map(s => s.id.replace('_CHG', ''));
+        let baseSites = (aptData.sites || []).filter(s => !changedSiteIds.includes(s.id));
+        
+        // Add default remark to base sites if missing
+        baseSites = baseSites.map(s => ({...s, remark: s.remark || 'Existing'}));
+        
+        const allExportSites = baseSites.concat(customSites);
+        
+        // Build CSV
+        let csvContent = "data:text/csv;charset=utf-8,";
+        csvContent += "ID,Latitude,Longitude,Azimuth,Radius_m,Beamwidth,Type,Remark\n";
+        
+        allExportSites.forEach(site => {
+            const row = [
+                site.id,
+                site.lat,
+                site.lon,
+                site.azimuth,
+                site.radius_m || site.clutter_radius || 600,
+                site.beamwidth || 65,
+                site.type,
+                `"${site.remark || 'Existing'}"`
+            ];
+            csvContent += row.join(",") + "\n";
+        });
+        
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", `All_Sites_${currentAirport.replace(/\s+/g, '_')}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
         
         document.getElementById('save-banner').style.display = 'none';
         editedStateChanged = false;

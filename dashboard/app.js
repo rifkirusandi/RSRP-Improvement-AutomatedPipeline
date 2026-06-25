@@ -13,6 +13,7 @@ let customSites = []; // Holds user-added/edited proposals
 let editedStateChanged = false;
 let selectedSite = null;
 let pendingNewSiteLatLng = null;
+let hiddenSiteTypes = new Set();
 
 // Initialize Map
 function initMap() {
@@ -239,13 +240,16 @@ function setupEditorListeners() {
 
     document.getElementById('btn-add-sector').addEventListener('click', () => {
         if (!selectedSite || selectedSite.type !== 'existing') return;
+        
+        const useHighGain = confirm("Do you want to use a High Gain Antenna?\n\nOK = High Gain (+20% radius, 33° beamwidth)\nCancel = Standard Antenna (Normal radius, 65° beamwidth)");
+        
         const newSector = {
             id: selectedSite.id + "_ADD",
             lat: selectedSite.lat,
             lon: selectedSite.lon,
             azimuth: (selectedSite.azimuth + 120) % 360,
-            radius_m: selectedSite.clutter_radius || 600, // 3GPP Clutter standard
-            beamwidth: 65,
+            radius_m: useHighGain ? ((selectedSite.clutter_radius || 600) * 1.2) : (selectedSite.clutter_radius || 600),
+            beamwidth: useHighGain ? 33 : 65,
             remark: 'Additional Sector',
             type: 'proposed_sector',
             tlp_id: 'N/A',
@@ -364,10 +368,12 @@ function renderMap() {
     
     // Draw Sites & Sectors
     activeSites.forEach(site => {
+        if (hiddenSiteTypes.has(site.type)) return;
+        
         // Draw sector
         let radius = 250; // standard viz radius for fans
         let beamwidth = site.beamwidth || 65;
-        let fillColor = (site.type === 'existing') ? 'orange' : (site.type === 'proposed_new' ? 'purple' : (site.remark === 'Change Antenna' ? 'cyan' : 'yellow'));
+        let fillColor = (site.type === 'existing') ? '#3498db' : ((site.type === 'proposed_new') ? '#000000' : '#9b59b6');
         
         const polygonPoints = getSectorPolygon([site.lat, site.lon], radius, site.azimuth, beamwidth);
         const sector = L.polygon(polygonPoints, {
@@ -521,6 +527,25 @@ const stateRadios = document.querySelectorAll('input[name="impl_state"]');
 stateRadios.forEach(radio => {
     radio.addEventListener('change', (e) => {
         currentImplState = e.target.value;
+        renderMap();
+    });
+});
+
+// Legend Toggle Listeners
+document.querySelectorAll('.legend-item.toggleable').forEach(item => {
+    item.addEventListener('click', (e) => {
+        const target = e.currentTarget;
+        const siteType = target.getAttribute('data-sitetype');
+        
+        if (hiddenSiteTypes.has(siteType)) {
+            hiddenSiteTypes.delete(siteType);
+            target.classList.add('active');
+            target.style.opacity = '1';
+        } else {
+            hiddenSiteTypes.add(siteType);
+            target.classList.remove('active');
+            target.style.opacity = '0.5';
+        }
         renderMap();
     });
 });

@@ -428,6 +428,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-document.getElementById('btn-dl-pptx').addEventListener('click', () => { window.location.href = /api/download/pptx/; });
 
-document.getElementById('btn-dl-excel').addEventListener('click', () => { window.location.href = '/api/download/excel'; });
+
+

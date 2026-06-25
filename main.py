@@ -7,8 +7,11 @@ from openpyxl.styles import Alignment, Font
 from shapely.geometry import Polygon, Point
 from shapely.ops import nearest_points
 from sklearn.cluster import DBSCAN
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import gc
 import matplotlib.colors as mcolors
 import contextily as cx
 from pptx import Presentation
@@ -28,6 +31,8 @@ SITES_CSV = r"C:\Request\Airport Improvement\sites covering airport in all huawe
 SHP_PATH = r"C:\Request\Airport Improvement\Internasional Airport Border\Internasional Airport Border.shp"
 TERRITORY_PATH = r"C:\Request\Airport Improvement\Territory\Territory IOH 202605 - May v3.shp"
 CLUTTER_PATH = r"C:\Request\Airport Improvement\Clutter\Morphology Indonesia V4.TAB"
+RUNWAY_SHP = r"C:\Request\Airport Improvement\Runway\airport runway line buffer 150 m.shp"
+TLP_CSV = r"C:\Request\Airport Improvement\TLP\All TLP NationWide Feb 2024 Update.csv"
 OUT_DIR = "Output"
 os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -103,6 +108,42 @@ gdf_territory_4326 = gdf_territory
 
 print("Loading cell sites...")
 df_cells_all = pd.read_csv(SITES_CSV)
+gdf_cells_all_3857 = gpd.GeoDataFrame(
+    df_cells_all, geometry=gpd.points_from_xy(df_cells_all.Longitude, df_cells_all.Latitude), crs="EPSG:4326"
+).to_crs(epsg=3857)
+
+print("Loading Runway shapefile...")
+try:
+    sf_r = shapefile.Reader(RUNWAY_SHP)
+    r_fields = [field[0] for field in sf_r.fields[1:]]
+    r_polys = []
+    r_airports = []
+    for shape_rec in sf_r.iterShapeRecords():
+        r_rec = dict(zip(r_fields, shape_rec.record))
+        r_name = r_rec.get('Airport', 'Unknown').strip().replace('\\', '')
+        poly = Polygon(shape_rec.shape.points)
+        r_polys.append(poly)
+        r_airports.append(r_name)
+    gdf_runways = gpd.GeoDataFrame({'Airport': r_airports, 'geometry': r_polys}, crs="EPSG:4326")
+    gdf_runways_3857 = gdf_runways.to_crs(epsg=3857)
+except Exception as e:
+    print(f"Error loading runway shapefile manually: {e}")
+    gdf_runways_3857 = gpd.GeoDataFrame(columns=['Airport', 'geometry'])
+
+print("Loading TLP dataset...")
+try:
+    df_tlp = pd.read_csv(TLP_CSV)
+    df_tlp['Longitude'] = pd.to_numeric(df_tlp['Longitude'], errors='coerce')
+    df_tlp['Latitude'] = pd.to_numeric(df_tlp['Latitude'], errors='coerce')
+    df_tlp = df_tlp.dropna(subset=['Longitude', 'Latitude'])
+    gdf_tlp = gpd.GeoDataFrame(
+        df_tlp, geometry=gpd.points_from_xy(df_tlp.Longitude, df_tlp.Latitude), crs="EPSG:4326"
+    ).to_crs(epsg=3857)
+    
+    pass
+except Exception as e:
+    print(f"Error loading TLP CSV: {e}")
+    gdf_tlp = gpd.GeoDataFrame()
 
 print("Loading all MR/MDT data into memory...")
 val_cols = {
@@ -155,11 +196,11 @@ def get_sector_polygon(cx_m, cy_m, lat, azimuth, radius_m=200, angle_deg=65):
     return Polygon(points)
 
 def get_rsrp_color(val):
-    if val < -115: return '#FF00EA' # Magenta
-    elif val < -105: return '#FF0000' # Red
-    elif val < -95: return '#FFFF00' # Yellow
-    elif val < -85: return '#00FF00' # Green
-    else: return '#0000FF' # Blue
+    if val < -115: return '#FF0000' # Red
+    elif val < -110: return '#FFC000' # Orange
+    elif val < -105: return '#FFFF00' # Yellow
+    elif val < -95: return '#92D050' # Light Green
+    else: return '#00B050' # Dark Green
 
 rsrq_cmap = plt.cm.get_cmap('RdYlGn')
 rsrq_min = float('inf')
@@ -239,6 +280,7 @@ def get_best_azimuths(site_pt_3857, radius_m, existing_azimuths, bad_spots_3857,
 
 for apt in airports:
     name = apt['name']
+    if "Kulon Progo" not in name: continue
     
     
     print(f"\nProcessing {name}...")
@@ -273,8 +315,32 @@ for apt in airports:
         sectors = []
         for idx, row in gdf_cells_3857.iterrows():
             site_key = f"{row.geometry.x}_{row.geometry.y}"
+            
+            cell_name = str(row.get('Cell Name', '')).upper()
+            if '_IN_I2_' in cell_name:
+                c_type = 'IBC2M'
+            elif '_IN_' in cell_name:
+                c_type = 'IBS'
+            else:
+                c_type = 'MACRO'
+                
             if site_key not in sites_info:
-                sites_info[site_key] = {'x': row.geometry.x, 'y': row.geometry.y, 'lat': row['Latitude'], 'site_id': row.get('Site ID', 'EXISTING_SITE'), 'azimuths': []}
+                sites_info[site_key] = {
+                    'x': row.geometry.x, 
+                    'y': row.geometry.y, 
+                    'lat': row['Latitude'], 
+                    'site_id': row.get('Site ID', 'EXISTING_SITE'), 
+                    'azimuths': [],
+                    'type': c_type
+                }
+            else:
+                # Upgrade type if needed (IBC2M > MACRO > IBS)
+                current = sites_info[site_key]['type']
+                if c_type == 'IBC2M':
+                    sites_info[site_key]['type'] = 'IBC2M'
+                elif c_type == 'MACRO' and current == 'IBS':
+                    sites_info[site_key]['type'] = 'MACRO'
+                    
             if not pd.isna(row['Azimuth']):
                 sites_info[site_key]['azimuths'].append(row['Azimuth'])
             sectors.append(get_sector_polygon(row.geometry.x, row.geometry.y, row['Latitude'], row['Azimuth'], radius_m=200))
@@ -310,22 +376,26 @@ for apt in airports:
             possible_matches_idx = list(clutter_gdf.sindex.query(pt_3857, predicate='intersects'))
             return len(possible_matches_idx) > 0
         return True  # If no clutter loaded, allow placement
+
+    def check_tlp(pt_3857):
+        return True
     
     def get_isd_min(pt_3857):
         if len(clutter_gdf) > 0:
             intersecting = clutter_gdf[clutter_gdf.contains(pt_3857)]
             if not intersecting.empty:
                 morpho = str(intersecting.iloc[0].get('Morpho', '')).strip().upper()
-                if 'DENSE URBAN' in morpho: return 500
-                elif 'SUB URBAN' in morpho: return 1500
-                elif 'URBAN' in morpho: return 1000
-                elif 'RURAL' in morpho: return 2000
-        return 1000 # default fallback
+                if 'DENSE URBAN' in morpho: return 800
+                elif 'SUB URBAN' in morpho: return 2000
+                elif 'URBAN' in morpho: return 1200
+                elif 'RURAL' in morpho: return 3000
+        return 1500 # default fallback
         
     processed_gdfs = {}
     
     # === OPTIMIZATION (Indoor MR RSRP) ===
     global_additional = []
+    global_change_antenna = []
     global_newsite = []
     global_calc_sectors = []
 
@@ -381,114 +451,191 @@ for apt in airports:
                         sector_poly_calc = None
                         
                         placed = False
-                        cluster_isd_base = get_isd_min(centroid_3857)
                         
-                        ns_pt = None
-                        relaxation = 0
+                        # Step 1: Check existing sites for upgrades
+                        closest_site_key = None
+                        closest_dist = float('inf')
                         
-                        while ns_pt is None and relaxation <= 1500:
-                            current_isd = max(500, cluster_isd_base - relaxation)
-                            
-                            # Try centroid first (must be inside clutter map)
-                            too_close = False
-                            if not is_inside_clutter(centroid_3857):
-                                too_close = True  # Not on land, skip
-                            else:
-                                for s_info in current_sites_info.values():
-                                    if centroid_3857.distance(Point(s_info['x'], s_info['y'])) < current_isd:
-                                        too_close = True
-                                        break
-                            
-                            if not too_close:
-                                ns_pt = centroid_3857
-                            else:
-                                # Find another point in the cluster that respects ISD AND is inside clutter
-                                for geom in cluster_pts.geometry:
-                                    if not is_inside_clutter(geom):
-                                        continue  # Skip points outside clutter (ocean etc)
-                                    too_close = False
-                                    for s_info in current_sites_info.values():
-                                        if geom.distance(Point(s_info['x'], s_info['y'])) < current_isd:
-                                            too_close = True
-                                            break
-                                    if not too_close:
-                                        ns_pt = geom
-                                        break
-                                        
-                            relaxation += 100
-                                    
-                        if ns_pt is not None:
-                            lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
-                            
-                            if ns_pt.distance(centroid_3857) > 1:
-                                base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
-                            else:
-                                base_az = 0
+                        for s_key, s_info in current_sites_info.items():
+                            site_pt = Point(s_info['x'], s_info['y'])
+                            dist = site_pt.distance(centroid_3857)
+                            # We can consider sites within 1.2 * radius_m
+                            if dist < closest_dist and dist <= radius_m * 1.2:
+                                closest_dist = dist
+                                closest_site_key = s_key
                                 
-                            azs = [snap_azimuth(base_az), snap_azimuth(base_az + 120), snap_azimuth(base_az + 240)]
+                        if closest_site_key is not None:
+                            s_info = current_sites_info[closest_site_key]
+                            site_type = s_info.get('type', 'MACRO')
+                            lon_s, lat_s = transformer_to_4326.transform(s_info['x'], s_info['y'])
+                            bearing_to_cluster = calculate_bearing(lon_s, lat_s, lon_c, lat_c)
                             
-                            new_site_key = f"new_{iteration}"
-                            dummy_site_id = f"{name.upper().replace(' ', '_')}_ARPT_{new_site_count:03d}"
-                            new_site_count += 1
-                            current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'site_id': dummy_site_id, 'azimuths': azs}
-                            
-                            for az in azs:
-                                airport_proposals.append({
-                                    'Site ID': dummy_site_id,
-                                    'Longitude': lon_ns,
-                                    'Latitude': lat_ns,
-                                    'Azimuth': az,
-                                    'Clutter': morpho,
-                                    'Radius': radius_m
-                                })
-                            
-                            for az in azs:
-                                poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200)
-                                poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m)
-                                
-                                global_newsite.append(poly_viz)
-                                global_calc_sectors.append(poly_calc)
-                                global_additional.append(poly_viz)
-                                
-                                uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
-                            placed = True
-                            
-                        if not placed:
-                            # We could NOT place a new site due to strict ISD.
-                            # Fallback: add an additional sector to the closest existing site
-                            closest_site_key = None
-                            closest_dist = float('inf')
-                            
-                            for s_key, s_info in current_sites_info.items():
-                                max_sec = 3 if 'new_' in s_key else 4
-                                if len(s_info['azimuths']) >= max_sec: continue
-                                site_pt = Point(s_info['x'], s_info['y'])
-                                dist = site_pt.distance(centroid_3857)
-                                if dist < closest_dist and dist <= radius_m:
-                                    closest_dist = dist
-                                    closest_site_key = s_key
-                            
-                            if closest_site_key is not None:
-                                s_info = current_sites_info[closest_site_key]
-                                lon_s, lat_s = transformer_to_4326.transform(s_info['x'], s_info['y'])
-                                azimuth = calculate_bearing(lon_s, lat_s, lon_c, lat_c)
-                                if is_valid_azimuth(azimuth, s_info['azimuths'], 90):
-                                    s_info['azimuths'].append(azimuth)
+                            # 1A: Propose IBC2M (If IBS only)
+                            if site_type == 'IBS' and closest_dist <= radius_m:
+                                if is_valid_azimuth(bearing_to_cluster, s_info['azimuths'], 90):
+                                    s_info['azimuths'].append(bearing_to_cluster)
+                                    s_info['type'] = 'IBC2M' # upgrade it
                                     airport_proposals.append({
                                         'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
                                         'Longitude': lon_s,
                                         'Latitude': lat_s,
-                                        'Azimuth': azimuth,
+                                        'Azimuth': bearing_to_cluster,
                                         'Clutter': morpho,
-                                        'Radius': radius_m
+                                        'Radius': radius_m,
+                                        'Remark': 'Additional IBC2M',
+                                        'Tower Provider ID': 'N/A',
+                                        'Tower Provider Name': 'N/A'
                                     })
-                                    sector_poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], azimuth, radius_m=radius_m)
-                                    sector_poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], azimuth, radius_m=200)
-                                    global_additional.append(sector_poly_viz)
-                                    global_calc_sectors.append(sector_poly_calc)
-                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(sector_poly_calc)]
+                                    poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], bearing_to_cluster, radius_m=radius_m, angle_deg=65)
+                                    poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], bearing_to_cluster, radius_m=200, angle_deg=65)
+                                    global_additional.append(poly_viz)
+                                    global_calc_sectors.append(poly_calc)
+                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
                                     placed = True
-
+                            
+                            # 1B: Change Antenna (If MACRO/IBC2M)
+                            if not placed and site_type in ['MACRO', 'IBC2M']:
+                                # Check if any existing sector points to the cluster
+                                for i_az, az in enumerate(list(s_info['azimuths'])):
+                                    diff = abs(bearing_to_cluster - az)
+                                    diff = min(diff, 360 - diff)
+                                    if diff <= 16.5: # 33 degree beamwidth
+                                        # It points to the cluster. Evaluate High Gain Antenna
+                                        new_radius = radius_m * 1.2
+                                        poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=new_radius, angle_deg=33)
+                                        # Does it actually cover any bad spots?
+                                        covered = uncovered_bad_spots[uncovered_bad_spots.geometry.within(poly_calc)]
+                                        if len(covered) > 0:
+                                            airport_proposals.append({
+                                                'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
+                                                'Longitude': lon_s,
+                                                'Latitude': lat_s,
+                                                'Azimuth': az,
+                                                'Clutter': morpho,
+                                                'Radius': new_radius,
+                                                'Remark': 'Change Antenna',
+                                                'Tower Provider ID': 'N/A',
+                                                'Tower Provider Name': 'N/A'
+                                            })
+                                            poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=200, angle_deg=33)
+                                            global_change_antenna.append(poly_viz) 
+                                            global_calc_sectors.append(poly_calc)
+                                            uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
+                                            placed = True
+                                            break
+                                        
+                            # 1C: Additional Sector (If MACRO/IBC2M and Change Antenna didn't happen)
+                            if not placed and site_type in ['MACRO', 'IBC2M'] and closest_dist <= radius_m:
+                                max_sec = 3 if 'new_' in closest_site_key else 4
+                                if len(s_info['azimuths']) < max_sec:
+                                    if is_valid_azimuth(bearing_to_cluster, s_info['azimuths'], 90):
+                                        s_info['azimuths'].append(bearing_to_cluster)
+                                        airport_proposals.append({
+                                            'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
+                                            'Longitude': lon_s,
+                                            'Latitude': lat_s,
+                                            'Azimuth': bearing_to_cluster,
+                                            'Clutter': morpho,
+                                            'Radius': radius_m,
+                                            'Remark': 'Additional Sector',
+                                            'Tower Provider ID': 'N/A',
+                                            'Tower Provider Name': 'N/A'
+                                        })
+                                        poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], bearing_to_cluster, radius_m=radius_m, angle_deg=65)
+                                        poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], bearing_to_cluster, radius_m=200, angle_deg=65)
+                                        global_additional.append(poly_viz)
+                                        global_calc_sectors.append(poly_calc)
+                                        uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
+                                        placed = True
+                                        
+                        # Step 2: New Site
+                        if not placed:
+                            ns_pt = None
+                            tlp_pid = 'N/A'
+                            tlp_pname = 'N/A'
+                            airport_runway = gdf_runways_3857[gdf_runways_3857['Airport'].str.contains(name, case=False, na=False)]
+                            
+                            def is_in_runway(pt):
+                                if airport_runway.empty: return False
+                                return any(airport_runway.geometry.contains(pt))
+                                
+                            if not gdf_tlp.empty:
+                                tlp_dists = gdf_tlp.geometry.distance(centroid_3857)
+                                nearby_tlp = gdf_tlp[tlp_dists <= 500].copy()
+                                if not nearby_tlp.empty:
+                                    nearby_tlp['dist'] = tlp_dists[tlp_dists <= 500]
+                                    nearby_tlp = nearby_tlp.sort_values('dist')
+                                    
+                                    for _, tlp_row in nearby_tlp.iterrows():
+                                        tlp_pt = tlp_row.geometry
+                                        if not is_in_runway(tlp_pt) and is_inside_clutter(tlp_pt):
+                                            # Ensure it's not within 50m of any existing airport site
+                                            too_close = False
+                                            if not gdf_cells_3857.empty:
+                                                dists_to_ex = gdf_cells_3857.distance(tlp_pt)
+                                                if dists_to_ex.min() <= 50:
+                                                    too_close = True
+                                            if too_close: continue
+                                            ns_pt = tlp_pt
+                                            tlp_pid = tlp_row.get('Tower Provider ID', 'N/A')
+                                            tlp_pname = tlp_row.get('Tower Provider Name', 'N/A')
+                                            break
+                                        
+                            if ns_pt is None:
+                                if is_in_runway(centroid_3857):
+                                    if not airport_runway.empty:
+                                        geom = airport_runway.geometry.iloc[0].exterior
+                                        p1, p2 = nearest_points(geom, centroid_3857)
+                                        ns_pt = p1
+                                else:
+                                    ns_pt = centroid_3857
+                            
+                            # Enforce ISD against all existing and newly placed sites
+                            if ns_pt is not None:
+                                min_req_isd = get_isd_min(ns_pt)
+                                for s_key, s_info in current_sites_info.items():
+                                    ex_pt = Point(s_info['x'], s_info['y'])
+                                    if ns_pt.distance(ex_pt) < min_req_isd:
+                                        ns_pt = None # Too close! Drop it.
+                                        break
+                                    
+                            if ns_pt is not None:
+                                lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
+                                
+                                if ns_pt.distance(centroid_3857) > 1:
+                                    base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
+                                else:
+                                    base_az = 0
+                                    
+                                azs = [snap_azimuth(base_az), snap_azimuth(base_az + 120), snap_azimuth(base_az + 240)]
+                                
+                                new_site_key = f"new_{iteration}"
+                                dummy_site_id = f"{name.upper().replace(' ', '_')}_ARPT_{new_site_count:03d}"
+                                new_site_count += 1
+                                current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'site_id': dummy_site_id, 'azimuths': azs, 'type': 'MACRO'}
+                                
+                                for az in azs:
+                                    airport_proposals.append({
+                                        'Site ID': dummy_site_id,
+                                        'Longitude': lon_ns,
+                                        'Latitude': lat_ns,
+                                        'Azimuth': az,
+                                        'Clutter': morpho,
+                                        'Radius': radius_m,
+                                        'Remark': 'New Site',
+                                        'Tower Provider ID': tlp_pid,
+                                        'Tower Provider Name': tlp_pname
+                                    })
+                                
+                                for az in azs:
+                                    poly_viz = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=200, angle_deg=65)
+                                    poly_calc = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, az, radius_m=radius_m, angle_deg=65)
+                                    
+                                    global_newsite.append(poly_viz)
+                                    global_calc_sectors.append(poly_calc)
+                                    
+                                    uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
+                                placed = True
                         if not placed:
                             print(f"DEBUG: Dropping cluster {largest_cluster} because no point respects ISD, and no existing site can take a new sector.")
                             uncovered_bad_spots = uncovered_bad_spots[uncovered_bad_spots['cluster'] != largest_cluster]
@@ -621,6 +768,7 @@ for apt in airports:
         evidence_path = os.path.join("Evidence", f"{name}_Coverage_Evidence.png")
         plt.savefig(evidence_path, bbox_inches='tight')
         plt.close(fig_ev)
+        gc.collect()
         print(f"Saved Evidence plot to {evidence_path}")
     # ---------------------
 
@@ -628,7 +776,8 @@ for apt in airports:
     img_paths = {}
     for metric in ['RSRP', 'RSRQ']:
         for env in ['Combine', 'Indoor']:
-            fig, axes = plt.subplots(1, 3, figsize=(18, 6.5), dpi=150)
+            num_plots = 4 if metric == 'RSRP' else 3
+            fig, axes = plt.subplots(1, num_plots, figsize=(24 if metric == 'RSRP' else 18, 6.5), dpi=150, facecolor='#111111')
             plt.subplots_adjust(wspace=0.1, bottom=0.20)
             
             mr_key = f"{metric}_{env}_MR"
@@ -647,38 +796,59 @@ for apt in airports:
             elif no_mdt:
                 fig.text(0.5, 0.5, "MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
             
-            titles = ['Map', f'MR {metric}', f'MDT {metric}']
+            titles = ['Map', f'MR {metric}', f'MR {metric} (After)', f'MDT {metric}'] if metric == 'RSRP' else ['Map', f'MR {metric}', f'MDT {metric}']
             
             for i, ax in enumerate(axes):
                 ax.set_xlim(xmin, xmax)
                 ax.set_ylim(ymin, ymax)
                 ax.axis('off')
-                ax.set_title(titles[i], loc='left', fontweight='bold', fontsize=16)
+                ax.set_title(titles[i], loc='left', fontweight='bold', fontsize=16, color='white')
                 
                 if i == 0:
                     cx.add_basemap(ax, crs="EPSG:3857", source=cx.providers.Esri.WorldImagery, attribution=False)
                 else:
-                    cx.add_basemap(ax, crs="EPSG:3857", source=cx.providers.CartoDB.Positron, attribution=False)
+                    cx.add_basemap(ax, crs="EPSG:3857", source=cx.providers.CartoDB.DarkMatter, attribution=False)
                     
-                if i == 1 and mr_gdf is not None:
-                    if metric == 'RSRP':
+                if metric == 'RSRP':
+                    if i == 1 and mr_gdf is not None:
                         mr_gdf.plot(ax=ax, color=mr_gdf['color'], alpha=1.0, edgecolor='none')
-                    else:
-                        mr_gdf.plot(ax=ax, column=val_cols[metric], cmap=rsrq_cmap, norm=rsrq_norm, alpha=1.0, edgecolor='none')
-                elif i == 2 and mdt_gdf is not None:
-                    if metric == 'RSRP':
+                    elif i == 2 and mr_gdf is not None:
+                        # Predictive MR (After)
+                        mr_pred = mr_gdf.copy()
+                        if combined_calc_poly is not None:
+                            # Update colors for points falling within the new coverage
+                            mask_bad = mr_pred[val_cols['RSRP']] < -105
+                            mask_covered = mr_pred.geometry.within(combined_calc_poly)
+                            mr_pred.loc[mask_bad & mask_covered, 'color'] = '#92D050' # Force them to Light Green (-105 to -95 range)
+                        mr_pred.plot(ax=ax, color=mr_pred['color'], alpha=1.0, edgecolor='none')
+                        
+                        # (Removed sector radii overlay as per user request)
+                        
+                    elif i == 3 and mdt_gdf is not None:
                         mdt_gdf.plot(ax=ax, color=mdt_gdf['color'], alpha=1.0, edgecolor='none')
-                    else:
+                else:
+                    # RSRQ
+                    if i == 1 and mr_gdf is not None:
+                        mr_gdf.plot(ax=ax, column=val_cols[metric], cmap=rsrq_cmap, norm=rsrq_norm, alpha=1.0, edgecolor='none')
+                    elif i == 2 and mdt_gdf is not None:
                         mdt_gdf.plot(ax=ax, column=val_cols[metric], cmap=rsrq_cmap, norm=rsrq_norm, alpha=1.0, edgecolor='none')
                 
                 if len(gdf_sectors) > 0:
                     gdf_sectors.plot(ax=ax, facecolor='orange', edgecolor='black', alpha=0.6, linewidth=0.5)
                     
-                if i == 1 and opt_data is not None:
-                    if len(opt_data['additional']) > 0:
-                        opt_data['additional'].plot(ax=ax, facecolor='yellow', edgecolor='black', alpha=0.8, linewidth=0.8)
-                    if len(opt_data['newsite']) > 0:
-                        opt_data['newsite'].plot(ax=ax, facecolor='purple', edgecolor='black', alpha=0.8, linewidth=0.8)
+                if (metric == 'RSRP' and (i == 1 or i == 2)) or (metric == 'RSRQ' and i == 1):
+                    # In earlier version, opt_data was passed but we rewrote optimization logic so we must rebuild from airport_proposals
+                    pass # Wait, we need to plot the new site locations and additional sectors
+                    
+                    if len(global_change_antenna) > 0:
+                        ca_gdf = gpd.GeoDataFrame(geometry=global_change_antenna, crs="EPSG:3857")
+                        ca_gdf.plot(ax=ax, facecolor='cyan', edgecolor='black', alpha=0.8, linewidth=0.8)
+                    if len(global_additional) > 0:
+                        add_gdf = gpd.GeoDataFrame(geometry=global_additional, crs="EPSG:3857")
+                        add_gdf.plot(ax=ax, facecolor='yellow', edgecolor='black', alpha=0.8, linewidth=0.8)
+                    if len(global_newsite) > 0:
+                        ns_gdf = gpd.GeoDataFrame(geometry=global_newsite, crs="EPSG:3857")
+                        ns_gdf.plot(ax=ax, facecolor='purple', edgecolor='black', alpha=0.8, linewidth=0.8)
                     
                 if len(apt['gdf_3857']) > 0:
                     apt['gdf_3857'].plot(ax=ax, facecolor='none', edgecolor='cyan', linewidth=2)
@@ -694,30 +864,39 @@ for apt in airports:
                 tbl = table_ax.table(cellText=table_data, cellLoc='center', loc='center')
                 tbl.auto_set_font_size(False)
                 tbl.set_fontsize(12)
-                tbl.scale(1, 1.5)
                 for (r, c), cell in tbl.get_celld().items():
+                    cell.set_text_props(color='white')
                     if r == 0:
-                        cell.set_text_props(weight='bold')
-                        cell.set_facecolor('#d9d9d9')
-                    cell.set_edgecolor('black')
+                        cell.set_text_props(weight='bold', color='white')
+                        cell.set_facecolor('#333333')
+                    else:
+                        cell.set_facecolor('#202020')
+                    cell.set_edgecolor('#555555')
 
             if metric == 'RSRP':
                 patches = [
-                    mpatches.Patch(color='#FF00EA', label='< -115'),
-                    mpatches.Patch(color='#FF0000', label='-115 to -105'),
-                    mpatches.Patch(color='#FFFF00', label='-105 to -95'),
-                    mpatches.Patch(color='#00FF00', label='-95 to -85'),
-                    mpatches.Patch(color='#0000FF', label='>= -85'),
+                    mpatches.Patch(color='#FF0000', label='< -115'),
+                    mpatches.Patch(color='#FFC000', label='-115 to -110'),
+                    mpatches.Patch(color='#FFFF00', label='-110 to -105'),
+                    mpatches.Patch(color='#92D050', label='-105 to -95'),
+                    mpatches.Patch(color='#00B050', label='>= -95'),
                     mpatches.Patch(facecolor='#FFCC99', edgecolor='black', label='Existing Site'),
-                    mpatches.Patch(facecolor='yellow', edgecolor='black', label='Additional Sector'),
+                    mpatches.Patch(facecolor='cyan', edgecolor='black', label='Change Antenna'),
+                    mpatches.Patch(facecolor='yellow', edgecolor='black', label='Add Sector'),
                     mpatches.Patch(facecolor='purple', edgecolor='black', label='New Site')
                 ]
-                fig.legend(handles=patches, loc='lower center', ncol=len(patches), bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=10)
+                legend = fig.legend(handles=patches, loc='lower center', ncol=len(patches), bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=9)
+                for text in legend.get_texts():
+                    text.set_color("white")
             else:
                 cax = fig.add_axes([0.3, 0.05, 0.4, 0.03])
                 sm = plt.cm.ScalarMappable(cmap=rsrq_cmap, norm=rsrq_norm)
                 sm.set_array([])
-                fig.colorbar(sm, cax=cax, orientation='horizontal', label='RSRQ (dB)')
+                cb = fig.colorbar(sm, cax=cax, orientation='horizontal', label='RSRQ (dB)')
+                cb.set_label('RSRQ (dB)', color='white')
+                cb.ax.xaxis.set_tick_params(color='white')
+                cb.outline.set_edgecolor('white')
+                plt.setp(plt.getp(cb.ax.axes, 'xticklabels'), color='white')
 
             img_path = os.path.join(OUT_DIR, f"{name}_{metric}_{env}_slide.png")
             plt.savefig(img_path, bbox_inches='tight', pad_inches=0.1)
@@ -730,6 +909,13 @@ for apt in airports:
     blank_layout = prs.slide_layouts[6]
 
     slide = prs.slides.add_slide(blank_layout)
+    
+    # Set background to dark gray
+    background = slide.background
+    fill = background.fill
+    fill.solid()
+    fill.fore_color.rgb = RGBColor(17, 17, 17)
+    
     txBox = slide.shapes.add_textbox(Inches(1), Inches(2.5), Inches(8), Inches(2))
     tf = txBox.text_frame
     p = tf.add_paragraph()
@@ -737,23 +923,27 @@ for apt in airports:
     p.font.bold = True
     p.font.size = Pt(44)
     p.font.name = 'Courier New'
+    p.font.color.rgb = RGBColor(255, 255, 255)
     
     p2 = tf.add_paragraph()
     run_date = p2.add_run()
     run_date.text = f"\n{day}"
     run_date.font.size = Pt(24)
     run_date.font.name = 'Courier New'
+    run_date.font.color.rgb = RGBColor(255, 255, 255)
     
     run_sup = p2.add_run()
     run_sup.text = suffix
     run_sup.font.size = Pt(24)
     run_sup.font.name = 'Courier New'
     run_sup.font.superscript = True
+    run_sup.font.color.rgb = RGBColor(255, 255, 255)
     
     run_month = p2.add_run()
     run_month.text = f" {month_year}"
     run_month.font.size = Pt(24)
     run_month.font.name = 'Courier New'
+    run_month.font.color.rgb = RGBColor(255, 255, 255)
 
     slides_order = [
         ('RSRP', 'Combine', f'{name} RSRP (Combine)'),
@@ -764,6 +954,13 @@ for apt in airports:
 
     for metric, env, title in slides_order:
         slide = prs.slides.add_slide(blank_layout)
+        
+        # Set background to dark gray
+        background = slide.background
+        fill = background.fill
+        fill.solid()
+        fill.fore_color.rgb = RGBColor(17, 17, 17)
+        
         txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.2), Inches(12), Inches(1))
         tf = txBox.text_frame
         tf.word_wrap = True
@@ -772,6 +969,7 @@ for apt in airports:
         p.font.bold = True
         p.font.size = Pt(32)
         p.font.name = 'Arial'
+        p.font.color.rgb = RGBColor(255, 255, 255)
         
         img_path = img_paths.get(f"{metric}_{env}")
         if img_path and os.path.exists(img_path):
@@ -790,6 +988,8 @@ for apt in airports:
     out_pptx = os.path.join(OUT_DIR, f"{name}_Airport_Improvement.pptx")
     prs.save(out_pptx)
     print(f"Saved {out_pptx}")
+    if len(global_all_proposals) > 0:
+        pd.DataFrame(global_all_proposals).to_excel(os.path.join(OUT_DIR, "All_Airports_Proposals.xlsx"), index=False)
     
     # --- ACCUMULATE EXCEL PROPOSALS ---
     if airport_proposals:

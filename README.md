@@ -37,31 +37,21 @@ This tool performs iterative clustering and geospatial analysis on historical Me
 
 ```mermaid
 graph TD
-    A[Start: Load Shapefiles & Configurations] --> B[Iterate over each Airport]
-    B --> C[Fetch Morphology Clutter & Target Area]
-    C --> D[Load & Process MR/MDT Data]
-    D --> E{Identify Bad Spots<br/>RSRP <= -105}
-    E -->|None| F[Skip Airport]
-    E -->|Found| G[Iterative DBSCAN Clustering]
+    A[Load Geospatial Bounds & Clutter] --> B[Load MR/MDT RSRP Data]
+    B --> C{Identify Bad Spots<br/>RSRP <= -105 dBm}
+    C -->|Found| D[Iterative DBSCAN Clustering]
     
-    G --> H{Centroid satisfies ISD >= 500m<br/>& Valid Clutter?}
-    H -->|Yes| I[Propose NEW Site<br/>& Subtract Covered Spots]
-    H -->|No| J[Drop Cluster / Assign to Existing]
+    D --> E{Centroid satisfies ISD >= 500m<br/>& inside Valid Clutter?}
+    E -->|Yes| F[Propose NEW Site<br/>Dynamic Radius Based on Clutter]
+    F --> G[Subtract Covered Bad Spots]
+    E -->|No| H[Drop Cluster]
     
-    I --> K{Remaining Bad Spots?}
-    J --> K
+    G --> I{Remaining Bad Spots?}
+    H --> I
     
-    K -->|Yes| G
-    K -->|No| L[Calculate Additional Sectors<br/>for Existing Sites]
+    I -->|Yes| D
+    I -->|No| J[Propose Additional Sectors<br/>for Existing Sites]
     
-    L --> M[Snap Azimuths to<br/>Multiples of 5 Degrees]
-    M --> N[Generate Matplotlib Evidence Plots]
-    N --> O[Create PPTX Presentation]
-    O --> P{More Airports?}
-    
-    P -->|Yes| B
-    P -->|No| Q[Aggregate Proposals into<br/>All_Airports_Proposals.xlsx]
-    Q --> R[Convert all PPTX to PDF]
-    R --> S[Sync PDFs to I: Drive]
-    S --> T[End]
+    J --> K[Snap Sector Azimuths<br/>to Multiples of 5 Degrees]
+    K --> L[Generate Proposals & Visualizations]
 ```

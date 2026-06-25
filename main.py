@@ -403,14 +403,15 @@ for apt in airports:
     global_calc_sectors = []
 
     try:
-        all_rsrp_dfs = [raw_data[k] for k in raw_data if 'RSRP' in k and 'Indoor' in k]
+        all_rsrp_dfs = [processed_gdfs[k] for k in processed_gdfs if 'RSRP_Indoor' in k and processed_gdfs[k] is not None]
         if all_rsrp_dfs:
-            df_in = pd.concat(all_rsrp_dfs, ignore_index=True)
-            df_in = df_in[(df_in['Longitude'] >= l_min) & (df_in['Longitude'] <= l_max) &
-                          (df_in['Latitude'] >= la_min) & (df_in['Latitude'] <= la_max)].copy()
-            if len(df_in) > 0:
-                gdf_in = gpd.GeoDataFrame(df_in, geometry=gpd.points_from_xy(df_in.Longitude, df_in.Latitude), crs="EPSG:4326")
+            gdf_in = pd.concat(all_rsrp_dfs, ignore_index=True)
+            if len(gdf_in) > 0:
                 airport_poly_4326 = apt['gdf_4326'].geometry.iloc[0]
+                gdf_in = gdf_in[gdf_in.geometry.within(airport_poly_4326)].copy()
+                
+                gdf_3857 = gdf_in.to_crs(epsg=3857)
+                bad_spots = gdf_3857[gdf_3857['RSRP'] < -95].copy()
                 airport_poly_3857 = apt['gdf_3857'].geometry.iloc[0]
                 airport_exterior = airport_poly_3857.exterior
                 

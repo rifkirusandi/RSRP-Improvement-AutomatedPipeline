@@ -7,8 +7,8 @@ import subprocess
 # ==========================================
 # PASTE YOUR TOKENS HERE
 # ==========================================
-SLACK_BOT_TOKEN = "xoxb-your-bot-token"
-SLACK_APP_TOKEN = "xapp-your-app-token"
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "")
+SLACK_APP_TOKEN = os.environ.get("SLACK_APP_TOKEN", "")
 
 app = App(token=SLACK_BOT_TOKEN)
 

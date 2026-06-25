@@ -169,7 +169,7 @@ function openEditor(site, isMarkerClick = false) {
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
-        document.getElementById('azimuth-slider').disabled = isMarkerClick || site.remark === 'Change Antenna'; // Cant rotate marker or changed antenna
+        document.getElementById('azimuth-slider').disabled = isMarkerClick; // Cant rotate marker
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
         document.getElementById('btn-add-sector').style.display = 'none'; // Hide for new sites
     }
@@ -187,22 +187,37 @@ function setupEditorListeners() {
     document.getElementById('editor-close').addEventListener('click', closeEditor);
     
     document.getElementById('azimuth-slider').addEventListener('input', (e) => {
-        if (!selectedSite || selectedSite.isMarkerClick || selectedSite.remark === 'Change Antenna') return;
+        if (!selectedSite || selectedSite.isMarkerClick) return;
         
         let aptData = DASHBOARD_DATA[currentAirport];
-        if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
-            if (selectedSite.original_azimuth === undefined) {
-                selectedSite.original_azimuth = selectedSite.azimuth;
+        let originalSite = null;
+        
+        if (selectedSite.original_azimuth === undefined) {
+            selectedSite.original_azimuth = selectedSite.azimuth;
+        }
+        
+        if (aptData && aptData.sites) {
+            originalSite = aptData.sites.find(s => s.id === selectedSite.id && (s.original_azimuth !== undefined ? s.original_azimuth === selectedSite.original_azimuth : s.azimuth === selectedSite.original_azimuth));
+        }
+        
+        if (originalSite) {
+            if (originalSite.original_azimuth === undefined) {
+                originalSite.original_azimuth = originalSite.azimuth;
             }
         }
         
         selectedSite.azimuth = parseInt(e.target.value);
         document.getElementById('azimuth-val').innerText = selectedSite.azimuth;
         
-        if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
-            const sig = `${selectedSite.id}_${selectedSite.original_azimuth}`;
+        if (originalSite) {
+            const sig = `${originalSite.id}_${originalSite.original_azimuth}`;
             if (!customSites.modified[sig]) customSites.modified[sig] = {};
             customSites.modified[sig].azimuth = selectedSite.azimuth;
+        } else {
+            const addedSite = (customSites.added || []).find(s => s.id === selectedSite.id && s.original_azimuth === selectedSite.original_azimuth);
+            if (addedSite) {
+                addedSite.azimuth = selectedSite.azimuth;
+            }
         }
         
         renderMap();
@@ -233,8 +248,14 @@ function setupEditorListeners() {
             customSites.added = customSites.added.filter(s => s !== selectedSite);
             
             // Mark this specific base sector as deleted
-            if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
-                customSites.deleted.push(`${selectedSite.id}_${selectedSite.azimuth}`);
+            let originalSite = null;
+            if (aptData && aptData.sites) {
+                if (selectedSite.original_azimuth === undefined) selectedSite.original_azimuth = selectedSite.azimuth;
+                originalSite = aptData.sites.find(s => s.id === selectedSite.id && (s.original_azimuth !== undefined ? s.original_azimuth === selectedSite.original_azimuth : s.azimuth === selectedSite.original_azimuth));
+            }
+            if (originalSite) {
+                if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+                customSites.deleted.push(`${originalSite.id}_${originalSite.original_azimuth}`);
             }
         }
         
@@ -265,9 +286,14 @@ function setupEditorListeners() {
             selectedSite.radius_m = selectedSite.isHighGain ? (baseRadius * 1.2) : baseRadius;
             selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
             
-            if (aptData && aptData.sites && aptData.sites.includes(selectedSite)) {
+            let originalSite = null;
+            if (aptData && aptData.sites) {
                 if (selectedSite.original_azimuth === undefined) selectedSite.original_azimuth = selectedSite.azimuth;
-                const sig = `${selectedSite.id}_${selectedSite.original_azimuth}`;
+                originalSite = aptData.sites.find(s => s.id === selectedSite.id && (s.original_azimuth !== undefined ? s.original_azimuth === selectedSite.original_azimuth : s.azimuth === selectedSite.original_azimuth));
+            }
+            if (originalSite) {
+                if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+                const sig = `${originalSite.id}_${originalSite.original_azimuth}`;
                 if (!customSites.modified[sig]) customSites.modified[sig] = {};
                 customSites.modified[sig].isHighGain = selectedSite.isHighGain;
                 customSites.modified[sig].remark = selectedSite.remark;
@@ -283,15 +309,34 @@ function setupEditorListeners() {
 
         // It's an existing site or proposed_sector (which includes "Change Antenna" sector)
         if (selectedSite.remark === 'Change Antenna') {
-            // Revert back to normal
-            customSites.added = customSites.added.filter(s => s !== selectedSite);
+            const isManualEdit = customSites.added && customSites.added.includes(selectedSite);
+            if (isManualEdit) {
+                // Revert back to normal for manual edits
+                customSites.added = customSites.added.filter(s => s !== selectedSite);
+            } else {
+                // System generated Change Antenna (in aptData.sites)
+                let originalSite = null;
+                if (aptData && aptData.sites) {
+                    if (selectedSite.original_azimuth === undefined) selectedSite.original_azimuth = selectedSite.azimuth;
+                    originalSite = aptData.sites.find(s => s.id === selectedSite.id && (s.original_azimuth !== undefined ? s.original_azimuth === selectedSite.original_azimuth : s.azimuth === selectedSite.original_azimuth));
+                }
+                if (originalSite) {
+                    if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+                    const sig = `${originalSite.id}_${originalSite.original_azimuth}`;
+                    if (!customSites.modified[sig]) customSites.modified[sig] = {};
+                    customSites.modified[sig].isHighGain = false;
+                    customSites.modified[sig].remark = '';
+                    customSites.modified[sig].beamwidth = 65;
+                    customSites.modified[sig].radius_m = selectedSite.clutter_radius || 600;
+                }
+            }
             markEdited();
             renderMap();
             closeEditor();
             return;
         }
         
-        if (selectedSite.type !== 'existing') return; // Guard
+        if (selectedSite.type !== 'existing' && selectedSite.type !== 'proposed_sector') return; // Guard
         
         let targetAzimuth = selectedSite.azimuth;
         
@@ -336,11 +381,13 @@ function setupEditorListeners() {
         
         const useHighGain = confirm("Do you want to use a High Gain Antenna?\n\nOK = High Gain (+20% radius, 33° beamwidth)\nCancel = Standard Antenna (Normal radius, 65° beamwidth)");
         
+        const initialAzimuth = (selectedSite.azimuth + 120) % 360;
         const newSector = {
             id: selectedSite.id + "_ADD",
             lat: selectedSite.lat,
             lon: selectedSite.lon,
-            azimuth: (selectedSite.azimuth + 120) % 360,
+            azimuth: initialAzimuth,
+            original_azimuth: initialAzimuth,
             radius_m: useHighGain ? ((selectedSite.clutter_radius || 600) * 1.2) : (selectedSite.clutter_radius || 600),
             clutter_radius: selectedSite.clutter_radius || 600,
             isHighGain: useHighGain,
@@ -420,6 +467,7 @@ function setupEditorListeners() {
                 lat: lat,
                 lon: lon,
                 azimuth: azimuths[i],
+                original_azimuth: azimuths[i],
                 radius_m: inferredClutterRadius,
                 clutter_radius: inferredClutterRadius,
                 beamwidth: 65,
@@ -520,14 +568,20 @@ function setupEditorListeners() {
                 }
                 
                 // For modified sites, we need to pull them from base and apply the mod
+                // Also include any unmodified system proposals (proposed_new, proposed_sector)
                 (aptData.sites || []).forEach(s => {
                     const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
                     const sig = `${s.id}_${baseAz}`;
+                    
+                    if (aptCustom.deleted && aptCustom.deleted.includes(sig)) return;
                     
                     if (aptCustom.modified && aptCustom.modified[sig]) {
                         let finalSite = { ...s, remark: s.remark || 'Existing' };
                         finalSite = { ...finalSite, ...aptCustom.modified[sig] };
                         sitesToExport.push(finalSite);
+                    } else if (s.type && s.type !== 'existing') {
+                        // Unmodified system proposal
+                        sitesToExport.push(s);
                     }
                 });
             }

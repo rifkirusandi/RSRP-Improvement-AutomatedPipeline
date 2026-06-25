@@ -224,11 +224,32 @@ function setupEditorListeners() {
 
     document.getElementById('btn-change-antenna').addEventListener('click', () => {
         if (!selectedSite || selectedSite.type !== 'existing') return;
+        
+        let targetAzimuth = selectedSite.azimuth;
+        
+        // Find ALL sectors for this site ID
+        const aptData = DASHBOARD_DATA[currentAirport];
+        let allSectorsForSite = (aptData.sites || []).filter(s => s.id === selectedSite.id);
+        
+        if (selectedSite.isMarkerClick && allSectorsForSite.length > 1) {
+            // Ask which one!
+            const azs = allSectorsForSite.map(s => s.azimuth).join('/');
+            const chosen = prompt(`This site has multiple sectors (${azs}). Which azimuth do you want to change?`, allSectorsForSite[0].azimuth);
+            if (!chosen) return; // User cancelled
+            const parsedAz = parseInt(chosen);
+            if (isNaN(parsedAz)) {
+                alert("Invalid azimuth entered.");
+                return;
+            }
+            targetAzimuth = parsedAz;
+        }
+
         const changedSite = {
             id: selectedSite.id + "_CHG",
             lat: selectedSite.lat,
             lon: selectedSite.lon,
-            azimuth: selectedSite.azimuth,
+            azimuth: targetAzimuth,
+            original_azimuth: targetAzimuth,
             radius_m: (selectedSite.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
             beamwidth: 33,
             remark: 'Change Antenna',
@@ -347,8 +368,14 @@ function setupEditorListeners() {
         if (!aptData) return;
         
         // Exclude base sites that were replaced by "Change Antenna"
-        const changedSiteIds = customSites.filter(s => s.remark === 'Change Antenna').map(s => s.id.replace('_CHG', ''));
-        let baseSites = (aptData.sites || []).filter(s => !changedSiteIds.includes(s.id));
+        const replacedSignatures = customSites
+            .filter(s => s.remark === 'Change Antenna')
+            .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
+            
+        let baseSites = (aptData.sites || []).filter(s => {
+            const sig = `${s.id}_${s.azimuth}`;
+            return !replacedSignatures.includes(sig);
+        });
         
         // Add default remark to base sites if missing
         baseSites = baseSites.map(s => ({...s, remark: s.remark || 'Existing'}));

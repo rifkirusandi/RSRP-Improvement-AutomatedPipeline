@@ -396,6 +396,18 @@ function setupEditorListeners() {
         renderMap();
     });
 
+    document.getElementById('btn-reset-edits').addEventListener('click', () => {
+        if (!confirm("Are you sure you want to delete ALL manual edits across ALL airports? This cannot be undone.")) return;
+        customSites = [];
+        customSitesMap = {};
+        localStorage.removeItem('rsrp_custom_sites');
+        editedStateChanged = false;
+        document.getElementById('save-banner').style.display = 'none';
+        closeEditor();
+        renderMap();
+        alert("All edits have been reset to the base version.");
+    });
+
     document.getElementById('btn-trigger-save').addEventListener('click', () => {
         const payload = {
             airport: currentAirport,

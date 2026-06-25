@@ -1,0 +1,176 @@
+/* Reset & Base */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+}
+
+#map {
+    width: 100vw;
+    height: 100vh;
+    z-index: 1;
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.1);
+    border-radius: 16px;
+    padding: 24px;
+    position: absolute;
+    z-index: 1000;
+}
+
+/* UI Panel (Top Left) */
+#ui-panel {
+    top: 20px;
+    left: 20px;
+    width: 320px;
+}
+
+#ui-panel h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 20px;
+}
+
+.control-group {
+    margin-bottom: 16px;
+}
+
+.control-group label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: #7f8c8d;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    font-family: 'Inter', sans-serif;
+    background: white;
+    color: #2c3e50;
+    outline: none;
+    transition: all 0.2s ease;
+}
+
+select:focus {
+    border-color: #3498db;
+    box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.2);
+}
+
+.radio-group {
+    display: flex;
+    gap: 16px;
+    margin-top: 10px;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 14px;
+    color: #2c3e50;
+    font-weight: 400 !important;
+    text-transform: none !important;
+    cursor: pointer;
+}
+
+/* Legends */
+.legend-panel {
+    padding: 16px 20px;
+    width: auto;
+    min-width: 220px;
+}
+
+.legend-panel.top-right {
+    top: 20px;
+    right: 20px;
+}
+
+.legend-panel.bottom-left {
+    bottom: 30px;
+    left: 20px;
+}
+
+.legend-panel h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.legend-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: #34495e;
+    margin-bottom: 8px;
+}
+
+.legend-item:last-child {
+    margin-bottom: 0;
+}
+
+/* Toggleable Legend Items */
+.legend-item.toggleable {
+    cursor: pointer;
+    transition: all 0.2s ease;
+    padding: 6px 10px;
+    border-radius: 8px;
+    margin-left: -10px; /* offset padding to align text */
+    user-select: none;
+}
+
+.legend-item.toggleable:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.legend-item.toggleable:active {
+    transform: scale(0.97);
+}
+
+.legend-item.toggleable:not(.active) {
+    opacity: 0.35;
+    filter: grayscale(100%);
+}
+
+.color-box {
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+}
+
+/* Site Markers */
+.marker {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid white;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.marker.existing { background: #3498db; }
+.marker.proposed-new { background: #000000; border-radius: 2px; } /* Square for new sites */
+.marker.proposed-sector { background: #9b59b6; }

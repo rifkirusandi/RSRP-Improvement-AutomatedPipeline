@@ -392,46 +392,66 @@ function setupEditorListeners() {
     });
 
     document.getElementById('btn-export-csv').addEventListener('click', () => {
-        const aptData = DASHBOARD_DATA[currentAirport];
-        if (!aptData) return;
+        // Sync current airport edits before exporting
+        if (currentAirport) customSitesMap[currentAirport] = customSites;
         
-        // Exclude base sites that were replaced by "Change Antenna"
-        const replacedSignatures = customSites
-            .filter(s => s.remark === 'Change Antenna')
-            .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
-            
-        let baseSites = (aptData.sites || []).filter(s => {
-            const sig = `${s.id}_${s.azimuth}`;
-            return !replacedSignatures.includes(sig);
-        });
-        
-        // Add default remark to base sites if missing
-        baseSites = baseSites.map(s => ({...s, remark: s.remark || 'Existing'}));
-        
-        const allExportSites = baseSites.concat(customSites);
-        
-        // Build CSV
+        const choice = prompt("What do you want to export across ALL airports?\n\n1 = All Sites (Existing + Edited/New)\n2 = Edited/New Sites Only\n\nType 1 or 2:");
+        if (!choice) return; // Cancelled
+        const isAll = choice.trim() === '1';
+        if (!isAll && choice.trim() !== '2') {
+            alert("Invalid choice. Export cancelled.");
+            return;
+        }
+
         let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "ID,Latitude,Longitude,Azimuth,Radius_m,Beamwidth,Type,Remark\n";
+        csvContent += "Airport,ID,Latitude,Longitude,Azimuth,Radius_m,Beamwidth,Type,Remark\n";
         
-        allExportSites.forEach(site => {
-            const row = [
-                site.id,
-                site.lat,
-                site.lon,
-                site.azimuth,
-                site.radius_m || site.clutter_radius || 600,
-                site.beamwidth || 65,
-                site.type,
-                `"${site.remark || 'Existing'}"`
-            ];
-            csvContent += row.join(",") + "\n";
-        });
+        for (const aptName in DASHBOARD_DATA) {
+            const aptData = DASHBOARD_DATA[aptName];
+            const aptCustomSites = customSitesMap[aptName] || [];
+            
+            if (!isAll && aptCustomSites.length === 0) continue; // Skip airports with no edits if they want edited only
+            
+            let sitesToExport = [];
+            
+            if (isAll) {
+                const replacedSignatures = aptCustomSites
+                    .filter(s => s.remark === 'Change Antenna')
+                    .map(s => `${s.id.replace('_CHG', '')}_${s.original_azimuth}`);
+                    
+                let baseSites = (aptData.sites || []).filter(s => {
+                    const sig = `${s.id}_${s.azimuth}`;
+                    return !replacedSignatures.includes(sig);
+                });
+                
+                baseSites = baseSites.map(s => ({...s, remark: s.remark || 'Existing'}));
+                sitesToExport = baseSites.concat(aptCustomSites);
+            } else {
+                sitesToExport = aptCustomSites;
+            }
+            
+            sitesToExport.forEach(site => {
+                const row = [
+                    `"${aptName}"`,
+                    site.id,
+                    site.lat,
+                    site.lon,
+                    site.azimuth,
+                    site.radius_m || site.clutter_radius || 600,
+                    site.beamwidth || 65,
+                    site.type,
+                    `"${site.remark || 'Existing'}"`
+                ];
+                csvContent += row.join(",") + "\n";
+            });
+        }
         
         const encodedUri = encodeURI(csvContent);
         const link = document.createElement("a");
         link.setAttribute("href", encodedUri);
-        link.setAttribute("download", `All_Sites_${currentAirport.replace(/\s+/g, '_')}.csv`);
+        
+        const fileName = isAll ? "All_Sites_All_Airports.csv" : "Edited_Sites_All_Airports.csv";
+        link.setAttribute("download", fileName);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);

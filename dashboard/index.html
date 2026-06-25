@@ -35,6 +35,43 @@
 
         <div class="control-group">
             <label for="env-select">Scenario</label>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airport Coverage Improvement</title>
+    
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="loading-screen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: white; display: flex; align-items: center; justify-content: center; z-index: 9999; font-size: 24px; font-family: sans-serif; flex-direction: column;">
+        <div>Loading Dashboard Data (28MB)...</div>
+        <div style="font-size: 16px; margin-top: 10px; color: #aaa;">This might take up to a minute depending on your connection.</div>
+    </div>
+    <div id="map"></div>
+
+    <!-- UI Overlay Panel -->
+    <div id="ui-panel" class="glass-panel">
+        <h1>Airport Coverage Improvement</h1>
+        
+        <div class="control-group">
+            <label for="source-select">Source</label>
+            <select id="source-select">
+                <option value="MR">MR</option>
+                <option value="MDT">MDT</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label for="env-select">Scenario</label>
             <select id="env-select">
                 <option value="Combine">Combine (Outdoor + Indoor)</option>
                 <option value="Indoor">Indoor Only</option>
@@ -61,10 +98,9 @@
         </div>
         
         <div style="margin-top: 15px;">
-            <button id="btn-add-new-site" style="width: 100%; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; padding: 10px; font-size: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">+ Add New Site</button>
+            <button id="btn-add-new-site" style="width: 100%; background: linear-gradient(135deg, #2ecc71, #27ae60); color: white; border: none; padding: 10px; font-size: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2); margin-bottom: 10px;">+ Add New Site</button>
+            <button id="btn-save-session" style="width: 100%; background: linear-gradient(135deg, #34495e, #2c3e50); color: white; border: none; padding: 10px; font-size: 14px; font-weight: bold; border-radius: 8px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.2);">💾 Save Session</button>
         </div>
-
-        
 
         <div class="control-group" id="implementation-toggle-group" style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
             <label>Implementation State</label>
@@ -163,7 +199,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="dashboard_data.js?v=18"></script>
-    <script src="app.js?v=18"></script>
+    <script src="dashboard_data.js?v=19"></script>
+    <script src="app.js?v=19"></script>
 </body>
 </html>

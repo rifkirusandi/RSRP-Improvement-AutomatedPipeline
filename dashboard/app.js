@@ -9,7 +9,8 @@ let map;
 let mrLayerGroup = L.layerGroup();
 let siteLayerGroup = L.layerGroup();
 let sectorLayerGroup = L.layerGroup();
-let customSites = []; // Holds user-added/edited proposals
+let customSitesMap = {}; // { 'AirportName': [customSites array] }
+let customSites = []; // Holds user-added/edited proposals for the current airport
 let editedStateChanged = false;
 let selectedSite = null;
 let pendingNewSiteLatLng = null;
@@ -83,10 +84,13 @@ function populateAirportDropdown() {
     });
 
     select.addEventListener('change', (e) => {
+        if (currentAirport) customSitesMap[currentAirport] = customSites;
+        
         currentAirport = e.target.value;
-        customSites = []; // reset manual edits when switching airports
-        editedStateChanged = false;
-        document.getElementById('save-banner').style.display = 'none';
+        customSites = customSitesMap[currentAirport] || [];
+        
+        editedStateChanged = customSites.length > 0;
+        document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
         closeEditor();
         renderMap();
     });
@@ -591,9 +595,30 @@ document.querySelectorAll('.legend-item.toggleable').forEach(item => {
     });
 });
 
+document.getElementById('btn-save-session').addEventListener('click', () => {
+    if (currentAirport) customSitesMap[currentAirport] = customSites;
+    localStorage.setItem('rsrp_custom_sites', JSON.stringify(customSitesMap));
+    alert('Session saved successfully! Your edits will be available even if you reload the page.');
+});
+
 document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('rsrp_custom_sites');
+    if (saved) {
+        try {
+            customSitesMap = JSON.parse(saved);
+        } catch(e) {}
+    }
+    
     initMap();
     setupEditorListeners();
+    
+    // Initial sync for the first loaded airport
+    if (currentAirport) {
+        customSites = customSitesMap[currentAirport] || [];
+        editedStateChanged = customSites.length > 0;
+        document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
+    }
+    
     renderMap();
 });
 

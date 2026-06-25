@@ -35,43 +35,6 @@
 
         <div class="control-group">
             <label for="env-select">Scenario</label>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Airport Coverage Improvement</title>
-    
-    <!-- Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
-    <!-- Custom Styles -->
-    <link rel="stylesheet" href="styles.css">
-</head>
-<body>
-    <div id="loading-screen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: white; display: flex; align-items: center; justify-content: center; z-index: 9999; font-size: 24px; font-family: sans-serif; flex-direction: column;">
-        <div>Loading Dashboard Data (28MB)...</div>
-        <div style="font-size: 16px; margin-top: 10px; color: #aaa;">This might take up to a minute depending on your connection.</div>
-    </div>
-    <div id="map"></div>
-
-    <!-- UI Overlay Panel -->
-    <div id="ui-panel" class="glass-panel">
-        <h1>Airport Coverage Improvement</h1>
-        
-        <div class="control-group">
-            <label for="source-select">Source</label>
-            <select id="source-select">
-                <option value="MR">MR</option>
-                <option value="MDT">MDT</option>
-            </select>
-        </div>
-
-        <div class="control-group">
-            <label for="env-select">Scenario</label>
             <select id="env-select">
                 <option value="Combine">Combine (Outdoor + Indoor)</option>
                 <option value="Indoor">Indoor Only</option>
@@ -146,7 +109,7 @@
         </div>
     </div>
 
-        <!-- Add New Site Modal -->
+    <!-- Add New Site Modal -->
     <div id="new-site-modal" class="glass-panel" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; width: 350px; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
         <h3 style="margin-top: 0; margin-bottom: 20px; color: #2ecc71;">Add New Site</h3>
         
@@ -199,7 +162,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="dashboard_data.js?v=21"></script>
-    <script src="app.js?v=21"></script>
+    <script src="dashboard_data.js?v=23"></script>
+    <script src="app.js?v=23"></script>
 </body>
 </html>

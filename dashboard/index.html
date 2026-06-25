@@ -15,6 +15,10 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+    <div id="loading-screen" style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: #111; color: white; display: flex; align-items: center; justify-content: center; z-index: 9999; font-size: 24px; font-family: sans-serif; flex-direction: column;">
+        <div>Loading Dashboard Data (28MB)...</div>
+        <div style="font-size: 16px; margin-top: 10px; color: #aaa;">This might take up to a minute depending on your connection.</div>
+    </div>
     <div id="map"></div>
 
     <!-- UI Overlay Panel -->
@@ -129,7 +133,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="dashboard_data.js"></script>
-    <script src="app.js"></script>
+    <script src="dashboard_data.js?v=3"></script>
+    <script src="app.js?v=3"></script>
 </body>
 </html>

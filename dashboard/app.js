@@ -33,6 +33,8 @@ function initMap() {
 
     populateAirportDropdown();
     
+    document.getElementById('loading-screen').style.display = 'none';
+    
     // Right click map to add a new site
     map.on('contextmenu', function(e) {
         if (!currentAirport) return;

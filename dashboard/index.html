@@ -110,6 +110,52 @@
         </div>
     </div>
 
+        <!-- Add New Site Modal -->
+    <div id="new-site-modal" class="glass-panel" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 2000; width: 350px; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <h3 style="margin-top: 0; margin-bottom: 20px; color: #2ecc71;">Add New Site</h3>
+        
+        <div class="control-group">
+            <label>How Many Sectors?</label>
+            <input type="number" id="new-site-sectors" min="1" max="6" value="3" style="width: 100%; margin-top: 5px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px; border-radius: 6px;">
+        </div>
+        
+        <div class="control-group" style="margin-top: 15px;">
+            <label>What are the Azimuths? (e.g. 20/190/270)</label>
+            <input type="text" id="new-site-azimuths" value="0/120/240" style="width: 100%; margin-top: 5px; background: rgba(255,255,255,0.1); color: #fff; border: 1px solid rgba(255,255,255,0.2); padding: 8px; border-radius: 6px;">
+            <div id="new-site-error" style="color: #e74c3c; font-size: 12px; margin-top: 5px; display: none;"></div>
+        </div>
+        
+        <div style="margin-top: 25px; display: flex; gap: 10px;">
+            <button id="btn-cancel-new-site" style="background: rgba(255,255,255,0.1); color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; flex: 1;">Cancel</button>
+            <button id="btn-confirm-new-site" style="background: #2ecc71; color: white; border: none; padding: 10px; border-radius: 6px; cursor: pointer; flex: 1; font-weight: bold;">Place Site</button>
+        </div>
+    </div>
+
+    <!-- Save & Regenerate Button -->
+    <div id="save-banner" style="display: none; position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(0,0,0,0.8); padding: 15px 30px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(10px);">
+        <button id="btn-trigger-save" style="background: linear-gradient(135deg, #3498db, #9b59b6); color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 20px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.2s;">Export Edits (JSON)</button>
+    </div>
+
+    <!-- Top Right: Sites Legend -->
+    <div id="sites-legend" class="glass-panel legend-panel top-right">
+        <h3>Sites Legend</h3>
+        <p style="font-size: 11px; color: #7f8c8d; margin-bottom: 10px; margin-top: -8px;">Click to toggle visibility</p>
+        <div class="legend-item toggleable active" data-sitetype="existing"><span class="marker existing"></span> Existing Site</div>
+        <div class="legend-item toggleable active" data-sitetype="proposed_new"><span class="marker proposed-new"></span> Proposed New Site</div>
+        <div class="legend-item toggleable active" data-sitetype="proposed_sector"><span class="marker proposed-sector"></span> Proposed Sector</div>
+    </div>
+
+    <!-- Bottom Left: Metrics Legend -->
+    <div id="metrics-legend" class="glass-panel legend-panel bottom-left">
+        <h3 id="metric-title">RSRP (dBm)</h3>
+        <div id="legend-rsrp">
+            <div class="legend-item"><span class="color-box" style="background: #2ecc71;"></span> &ge; -95 (Good)</div>
+            <div class="legend-item"><span class="color-box" style="background: #f1c40f;"></span> -105 to -95 (Fair)</div>
+            <div class="legend-item"><span class="color-box" style="background: #e74c3c;"></span> &lt; -105 (Poor)</div>
+        </div>
+        <div id="legend-rsrq" style="display: none;">
+            <div class="legend-item"><span class="color-box" style="background: #2ecc71;"></span> &ge; -12 (Good)</div>
+            <div class="legend-item"><span class="color-box" style="background: #f1c40f;"></span> -15 to -12 (Fair)</div>
     <!-- Save & Regenerate Button -->
     <div id="save-banner" style="display: none; position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); z-index: 1000; background: rgba(0,0,0,0.8); padding: 15px 30px; border-radius: 30px; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(10px);">
         <button id="btn-trigger-save" style="background: linear-gradient(135deg, #3498db, #9b59b6); color: white; border: none; padding: 10px 20px; font-size: 16px; font-weight: bold; border-radius: 20px; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.3); transition: transform 0.2s;">Export Edits (JSON)</button>
@@ -141,7 +187,7 @@
 
     <!-- Scripts -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="dashboard_data.js?v=11"></script>
-    <script src="app.js?v=11"></script>
+    <script src="dashboard_data.js?v=12"></script>
+    <script src="app.js?v=12"></script>
 </body>
 </html>

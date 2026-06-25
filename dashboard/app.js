@@ -12,6 +12,7 @@ let sectorLayerGroup = L.layerGroup();
 let customSites = []; // Holds user-added/edited proposals
 let editedStateChanged = false;
 let selectedSite = null;
+let pendingNewSiteLatLng = null;
 
 // Initialize Map
 function initMap() {
@@ -247,33 +248,60 @@ function setupEditorListeners() {
         document.getElementById('map').style.cursor = 'crosshair';
         map.once('click', function(e) {
             document.getElementById('map').style.cursor = '';
-            
-            const numSectors = prompt("How many sectors?", "3");
-            if (!numSectors) return;
-            const siteId = prompt("Enter Site ID (e.g. NEW_01):", "NEW_01");
-            if (!siteId) return;
-            
-            for(let i = 0; i < parseInt(numSectors); i++) {
-                let az = parseInt(prompt(`Azimuth for Sector ${i+1}?`, (i * 120) % 360));
-                if (isNaN(az)) continue;
-                
-                const newSector = {
-                    id: siteId,
-                    lat: e.latlng.lat,
-                    lon: e.latlng.lng,
-                    azimuth: az,
-                    radius_m: 600, // Default to urban
-                    beamwidth: 65,
-                    remark: 'New Site',
-                    type: 'proposed_new',
-                    tlp_id: 'N/A',
-                    tlp_name: 'N/A'
-                };
-                customSites.push(newSector);
-            }
-            markEdited();
-            renderMap();
+            pendingNewSiteLatLng = e.latlng;
+            document.getElementById('new-site-modal').style.display = 'block';
+            document.getElementById('new-site-error').style.display = 'none';
         });
+    });
+
+    document.getElementById('btn-cancel-new-site').addEventListener('click', () => {
+        document.getElementById('new-site-modal').style.display = 'none';
+        pendingNewSiteLatLng = null;
+    });
+
+    document.getElementById('btn-confirm-new-site').addEventListener('click', () => {
+        const numSectorsStr = document.getElementById('new-site-sectors').value;
+        const azimuthsStr = document.getElementById('new-site-azimuths').value;
+        const errDiv = document.getElementById('new-site-error');
+        
+        const numSectors = parseInt(numSectorsStr);
+        if (isNaN(numSectors) || numSectors < 1) {
+            errDiv.innerText = "Please enter a valid number of sectors.";
+            errDiv.style.display = 'block';
+            return;
+        }
+        
+        const azimuths = azimuthsStr.split('/').map(s => parseInt(s.trim()));
+        if (azimuths.length !== numSectors || azimuths.some(isNaN)) {
+            errDiv.innerText = `Please enter exactly ${numSectors} valid azimuths separated by '/'.`;
+            errDiv.style.display = 'block';
+            return;
+        }
+        
+        // Generate site ID: e.g. KOMODO_842
+        const prefix = currentAirport ? currentAirport.toUpperCase().replace(/\s+/g, '_') : 'SITE';
+        const siteId = prefix + '_' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+        
+        for(let i = 0; i < numSectors; i++) {
+            const newSector = {
+                id: siteId,
+                lat: pendingNewSiteLatLng.lat,
+                lon: pendingNewSiteLatLng.lng,
+                azimuth: azimuths[i],
+                radius_m: 600, // Default to urban
+                beamwidth: 65,
+                remark: 'New Site',
+                type: 'proposed_new',
+                tlp_id: 'N/A',
+                tlp_name: 'N/A'
+            };
+            customSites.push(newSector);
+        }
+        
+        document.getElementById('new-site-modal').style.display = 'none';
+        pendingNewSiteLatLng = null;
+        markEdited();
+        renderMap();
     });
 
     document.getElementById('btn-trigger-save').addEventListener('click', () => {

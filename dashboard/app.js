@@ -92,7 +92,7 @@ function populateAirportDropdown() {
         editedStateChanged = customSites.length > 0;
         document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
         closeEditor();
-        renderMap();
+        renderMap(true);
     });
 }
 
@@ -413,7 +413,7 @@ function setupEditorListeners() {
     });
 }
 
-function renderMap() {
+function renderMap(forceCenter = false) {
     mrLayerGroup.clearLayers();
     siteLayerGroup.clearLayers();
     sectorLayerGroup.clearLayers();
@@ -423,7 +423,7 @@ function renderMap() {
     const airport = DASHBOARD_DATA[currentAirport];
     
     // Auto center
-    if (!editedStateChanged) { // Only set view if we just switched airport
+    if (forceCenter || !editedStateChanged) {
         const bbox = airport.bbox || airport.bounds;
         const bounds = [
             [bbox[1], bbox[0]],
@@ -646,7 +646,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
     }
     
-    renderMap();
+    renderMap(true);
 });
 
 

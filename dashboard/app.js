@@ -163,11 +163,13 @@ function openEditor(site, isMarkerClick = false) {
         document.getElementById('btn-delete-site').style.display = 'none'; // Cant delete existing
         document.getElementById('azimuth-slider').disabled = true; // Cant rotate existing here
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
+        document.getElementById('btn-add-sector').style.display = 'block'; // Only for existing
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
         document.getElementById('azimuth-slider').disabled = isMarkerClick || site.remark === 'Change Antenna'; // Cant rotate marker or changed antenna
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
+        document.getElementById('btn-add-sector').style.display = 'none'; // Hide for new sites
     }
     
     let isHighGain = site.remark === 'Change Antenna' || site.isHighGain;

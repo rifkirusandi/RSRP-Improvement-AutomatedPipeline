@@ -154,9 +154,11 @@ function openEditor(site) {
     if (site.type === 'existing') {
         document.getElementById('btn-delete-site').style.display = 'none'; // Cant delete existing
         document.getElementById('azimuth-slider').disabled = true; // Cant rotate existing here
+        document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('azimuth-slider').disabled = false;
+        document.getElementById('existing-site-actions').style.display = 'none';
     }
 }
 
@@ -199,6 +201,46 @@ function setupEditorListeners() {
         closeEditor();
     });
     
+
+    document.getElementById('btn-change-antenna').addEventListener('click', () => {
+        if (!selectedSite || selectedSite.type !== 'existing') return;
+        const changedSite = {
+            id: selectedSite.id + "_CHG",
+            lat: selectedSite.lat,
+            lon: selectedSite.lon,
+            azimuth: selectedSite.azimuth,
+            radius_m: (selectedSite.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
+            beamwidth: 33,
+            remark: 'Change Antenna',
+            type: 'proposed_sector',
+            tlp_id: 'N/A',
+            tlp_name: 'N/A'
+        };
+        customSites.push(changedSite);
+        markEdited();
+        renderMap();
+        closeEditor();
+    });
+
+    document.getElementById('btn-add-sector').addEventListener('click', () => {
+        if (!selectedSite || selectedSite.type !== 'existing') return;
+        const newSector = {
+            id: selectedSite.id + "_ADD",
+            lat: selectedSite.lat,
+            lon: selectedSite.lon,
+            azimuth: (selectedSite.azimuth + 120) % 360,
+            radius_m: selectedSite.clutter_radius || 600, // 3GPP Clutter standard
+            beamwidth: 65,
+            remark: 'Additional Sector',
+            type: 'proposed_sector',
+            tlp_id: 'N/A',
+            tlp_name: 'N/A'
+        };
+        customSites.push(newSector);
+        markEdited();
+        renderMap();
+        openEditor(newSector); // Switch editor to the new sector so they can adjust azimuth
+    });
 
     document.getElementById('btn-add-new-site').addEventListener('click', () => {
         alert("Please click anywhere on the map to place the new site.");
@@ -294,45 +336,7 @@ function renderMap() {
         }).addTo(sectorLayerGroup);
         
         sector.on('click', function(e) {
-            if (site.type === 'existing') {
-                const choice = prompt("Type '1' to Change Antenna (cyan, narrow, longer). Type '2' to Add Sector (adjustable azimuth, standard radius).", "1");
-                if (choice === '1') {
-                    const changedSite = {
-                        id: site.id + "_CHG",
-                        lat: site.lat,
-                        lon: site.lon,
-                        azimuth: site.azimuth,
-                        radius_m: (site.clutter_radius || 600) * 1.2, // 3GPP Clutter standard + 20%
-                        beamwidth: 33,
-                        remark: 'Change Antenna',
-                        type: 'proposed_sector',
-                        tlp_id: 'N/A',
-                        tlp_name: 'N/A'
-                    };
-                    customSites.push(changedSite);
-                    markEdited();
-                    renderMap();
-                } else if (choice === '2') {
-                    const newSector = {
-                        id: site.id + "_ADD",
-                        lat: site.lat,
-                        lon: site.lon,
-                        azimuth: (site.azimuth + 120) % 360,
-                        radius_m: site.clutter_radius || 600, // 3GPP Clutter standard
-                        beamwidth: 65,
-                        remark: 'Additional Sector',
-                        type: 'proposed_sector',
-                        tlp_id: 'N/A',
-                        tlp_name: 'N/A'
-                    };
-                    customSites.push(newSector);
-                    markEdited();
-                    renderMap();
-                    openEditor(newSector); // Open editor so they can adjust azimuth
-                }
-            } else {
-                openEditor(site);
-            }
+            openEditor(site);
         });
 
         // Draw marker
@@ -350,7 +354,13 @@ function renderMap() {
         const isDraggable = (site.type !== 'existing');
         const marker = L.marker([site.lat, site.lon], { icon: icon, draggable: isDraggable }).addTo(siteLayerGroup);
         
-        let popupContent = `<b>${site.id}</b><br>Type: ${site.remark}<br>Azimuth: ${site.azimuth}&deg;`;
+        let siteAzimuths = activeSites
+            .filter(s => s.id === site.id)
+            .map(s => s.azimuth)
+            .sort((a,b) => a-b)
+            .join('/');
+            
+        let popupContent = `<b>${site.id}</b><br>Type: ${site.remark || 'Existing'}<br>Azimuths: ${siteAzimuths}&deg;`;
         if (site.type === 'proposed_new') {
             popupContent += `<br>TLP: ${site.tlp_id}`;
         }

@@ -437,7 +437,7 @@ function setupEditorListeners() {
 
     document.getElementById('btn-reset-edits').addEventListener('click', () => {
         if (!confirm("Are you sure you want to delete ALL manual edits across ALL airports? This cannot be undone.")) return;
-        customSites = [];
+        customSites = { added: [], deleted: [], modified: {} };
         customSitesMap = {};
         localStorage.removeItem('rsrp_custom_sites');
         editedStateChanged = false;
@@ -813,8 +813,8 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Initial sync for the first loaded airport
     if (currentAirport) {
-        customSites = customSitesMap[currentAirport] || [];
-        editedStateChanged = customSites.length > 0;
+        customSites = customSitesMap[currentAirport] || { added: [], deleted: [], modified: {} };
+        editedStateChanged = customSites.added.length > 0 || customSites.deleted.length > 0 || Object.keys(customSites.modified).length > 0;
         document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
     }
     

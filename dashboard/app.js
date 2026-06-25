@@ -176,17 +176,7 @@ function setupEditorListeners() {
         markEdited();
     });
     
-    document.getElementById('remark-select').addEventListener('change', (e) => {
-        if (!selectedSite) return;
-        selectedSite.remark = e.target.value;
-        selectedSite.beamwidth = (selectedSite.remark === 'Change Antenna') ? 33 : 65;
-        if (selectedSite.remark === 'New Site') selectedSite.type = 'proposed_new';
-        else if (selectedSite.remark === 'Existing') selectedSite.type = 'existing';
-        else selectedSite.type = 'proposed_sector';
-        
-        renderMap();
-        markEdited();
-    });
+    // Remark select listener removed because the dropdown was changed to a disabled input field
     
     document.getElementById('btn-delete-site').addEventListener('click', () => {
         if (!selectedSite) return;
@@ -384,8 +374,7 @@ function renderMap() {
     if (currentMetric !== 'NONE') {
         let dataPoints = [];
         if (airport.mr_data && airport.mr_data[currentEnv] && airport.mr_data[currentEnv][currentSource]) {
-            const metricKey = currentMetric + '_' + currentImplState;
-            dataPoints = airport.mr_data[currentEnv][currentSource][metricKey] || [];
+            dataPoints = airport.mr_data[currentEnv][currentSource][currentMetric] || [];
         }
 
         dataPoints.forEach(raw => {

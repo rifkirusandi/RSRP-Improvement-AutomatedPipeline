@@ -67,7 +67,7 @@ function initMap() {
 function markEdited() {
     editedStateChanged = true;
     document.getElementById('save-banner').style.display = 'flex';
-    document.getElementById('impl-toggle').checked = true;
+    document.querySelector('input[name="impl_state"][value="after"]').checked = true;
     currentImplState = 'after';
 }
 

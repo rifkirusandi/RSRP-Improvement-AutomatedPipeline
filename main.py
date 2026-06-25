@@ -285,8 +285,6 @@ def get_best_azimuths(site_pt_3857, radius_m, existing_azimuths, bad_spots_3857,
 
 for apt in airports:
     name = apt['name']
-    if "Kulon Progo" not in name: continue
-    
     
     print(f"\nProcessing {name}...")
     
@@ -405,7 +403,7 @@ for apt in airports:
     global_calc_sectors = []
 
     try:
-        all_rsrp_dfs = [raw_data[k] for k in raw_data if 'RSRP' in k]
+        all_rsrp_dfs = [raw_data[k] for k in raw_data if 'RSRP' in k and 'Indoor' in k]
         if all_rsrp_dfs:
             df_in = pd.concat(all_rsrp_dfs, ignore_index=True)
             df_in = df_in[(df_in['Longitude'] >= l_min) & (df_in['Longitude'] <= l_max) &
@@ -558,11 +556,10 @@ for apt in airports:
                             ns_pt = None
                             tlp_pid = 'N/A'
                             tlp_pname = 'N/A'
-                            airport_runway = gdf_runways_3857[gdf_runways_3857['Airport'].str.contains(name, case=False, na=False)]
+                            airport_runway = gpd.GeoDataFrame()  # Disabled runway check
                             
                             def is_in_runway(pt):
-                                if airport_runway.empty: return False
-                                return any(airport_runway.geometry.contains(pt))
+                                return False  # Runway check disabled
                                 
                             if not gdf_tlp.empty:
                                 tlp_dists = gdf_tlp.geometry.distance(centroid_3857)

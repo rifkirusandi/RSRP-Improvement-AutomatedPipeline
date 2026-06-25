@@ -38,6 +38,8 @@ try:
 except Exception as e:
     print(f"Error loading clutter: {e}")
 
+
+
 def get_clutter_radius(lon, lat):
     if global_clutter_gdf.empty: return 600
     pt = Point(lon, lat)
@@ -75,12 +77,12 @@ for shape_rec in sf.iterShapeRecords():
         'sites': [],
         'mr_data': {
             'Combine': {
-                'MR': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []},
-                'MDT': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []}
+                'MR': {'RSRP': [], 'RSRQ': []},
+                'MDT': {'RSRP': [], 'RSRQ': []}
             },
             'Indoor': {
-                'MR': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []},
-                'MDT': {'RSRP_before': [], 'RSRQ_before': [], 'RSRP_after': [], 'RSRQ_after': []}
+                'MR': {'RSRP': [], 'RSRQ': []},
+                'MDT': {'RSRP': [], 'RSRQ': []}
             }
         }
     }
@@ -94,7 +96,7 @@ df_cells = df_cells.dropna(subset=['Longitude', 'Latitude'])
 
 # Load Proposals
 print("Loading proposed sites...")
-df_prop = pd.read_excel(PROPOSALS_XLSX)
+df_prop = pd.read_excel(PROPOSALS_XLSX, sheet_name=0)
 
 for airport_name, data in airports.items():
     print(f"Processing {airport_name}...")
@@ -133,20 +135,47 @@ for airport_name, data in airports.items():
         
         remark = str(row.get('Remark', ''))
         beamwidth = 33 if 'Change Antenna' in remark else 65
+        prop_azimuth = round(float(row.get('Azimuth', 0)), 0)
         
-        data['sites'].append({
-            'id': site_id,
-            'lon': round(float(row['Longitude']), 5),
-            'lat': round(float(row['Latitude']), 5),
-            'azimuth': round(float(row.get('Azimuth', 0)), 0),
-            'radius_m': round(radius_m, 0),
-            'beamwidth': beamwidth,
-            'remark': remark,
-            'type': 'proposed_new' if is_new else 'proposed_sector'
-        })
+        # For Change Antenna: replace the matching existing sector in-place
+        if 'Change Antenna' in remark:
+            replaced = False
+            for existing in data['sites']:
+                if existing['type'] == 'existing' and existing['id'] == site_id and existing['azimuth'] == prop_azimuth:
+                    existing['original_azimuth'] = existing['azimuth']
+                    existing['beamwidth'] = 33
+                    existing['radius_m'] = round(radius_m, 0)
+                    existing['remark'] = remark
+                    existing['isHighGain'] = True
+                    replaced = True
+                    break
+            if not replaced:
+                # Fallback: add as proposed_sector if no matching existing sector found
+                data['sites'].append({
+                    'id': site_id,
+                    'lon': round(float(row['Longitude']), 5),
+                    'lat': round(float(row['Latitude']), 5),
+                    'azimuth': prop_azimuth,
+                    'radius_m': round(radius_m, 0),
+                    'beamwidth': beamwidth,
+                    'remark': remark,
+                    'isHighGain': True,
+                    'type': 'proposed_sector'
+                })
+        else:
+            data['sites'].append({
+                'id': site_id,
+                'lon': round(float(row['Longitude']), 5),
+                'lat': round(float(row['Latitude']), 5),
+                'azimuth': prop_azimuth,
+                'radius_m': round(radius_m, 0),
+                'beamwidth': beamwidth,
+                'remark': remark,
+                'type': 'proposed_new' if is_new else 'proposed_sector'
+            })
 
         
-    # Load MR/MDT Data with Grid Sampling for After, and Bad Spots for Before
+    # Load MR/MDT Data with Unified Downsampling
     val_cols = {'RSRP': 'RSRP(All MRs) (dBm)', 'RSRQ': 'RSRQ(All MRs) (dB)'}
     
     for env in ['Combine', 'Indoor']:
@@ -163,38 +192,41 @@ for airport_name, data in airports.items():
             mask_q = (df_rsrq['Longitude'] >= minx) & (df_rsrq['Longitude'] <= maxx) & (df_rsrq['Latitude'] >= miny) & (df_rsrq['Latitude'] <= maxy)
             df_rsrq = df_rsrq[mask_q]
             
-            # BEFORE STATE: Only bad spots, grid sampled to their scale to avoid overlap
-            df_rsrp_bad = df_rsrp[df_rsrp[val_cols['RSRP']] < -105].copy()
-            df_rsrq_bad = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15].copy()
-            
+            # Grid size for precise placement (to prevent overlap)
             grid_size = 0.00045 if source == 'MR' else 0.00018
-            if len(df_rsrp_bad) > 0:
-                df_rsrp_bad['grid_lon'] = (df_rsrp_bad['Longitude'] / grid_size).round() * grid_size
-                df_rsrp_bad['grid_lat'] = (df_rsrp_bad['Latitude'] / grid_size).round() * grid_size
-                df_rsrp_bad = df_rsrp_bad.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRP']].mean().reset_index()
-                for _, row in df_rsrp_bad.iterrows():
-                    data['mr_data'][env][source]['RSRP_before'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRP']], 1)])
+            grid_size_sparse = 0.0022 # 250m for good spots
             
-            if len(df_rsrq_bad) > 0:
-                df_rsrq_bad['grid_lon'] = (df_rsrq_bad['Longitude'] / grid_size).round() * grid_size
-                df_rsrq_bad['grid_lat'] = (df_rsrq_bad['Latitude'] / grid_size).round() * grid_size
-                df_rsrq_bad = df_rsrq_bad.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRQ']].mean().reset_index()
-                for _, row in df_rsrq_bad.iterrows():
-                    data['mr_data'][env][source]['RSRQ_before'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRQ']], 1)])
+            # RSRP: Keep ALL spots for MDT, but ONLY bad spots for MR
+            if len(df_rsrp) > 0:
+                if source == 'MR':
+                    df_rsrp_target = df_rsrp[df_rsrp[val_cols['RSRP']] < -105].copy()
+                else:
+                    df_rsrp_target = df_rsrp.copy()
                 
-            # AFTER STATE: 250m Grid average (0.0022 degrees)
-            df_rsrp['grid_lon'] = (df_rsrp['Longitude'] / 0.0022).round() * 0.0022
-            df_rsrp['grid_lat'] = (df_rsrp['Latitude'] / 0.0022).round() * 0.0022
-            df_rsrp_grid = df_rsrp.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRP']].mean().reset_index()
-            
-            df_rsrq['grid_lon'] = (df_rsrq['Longitude'] / 0.0022).round() * 0.0022
-            df_rsrq['grid_lat'] = (df_rsrq['Latitude'] / 0.0022).round() * 0.0022
-            df_rsrq_grid = df_rsrq.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRQ']].mean().reset_index()
-            
-            for _, row in df_rsrp_grid.iterrows():
-                data['mr_data'][env][source]['RSRP_after'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRP']], 1)])
-            for _, row in df_rsrq_grid.iterrows():
-                data['mr_data'][env][source]['RSRQ_after'].append([round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRQ']], 1)])
+                final_rsrp = []
+                if len(df_rsrp_target) > 0:
+                    df_rsrp_target['grid_lon'] = (df_rsrp_target['Longitude'] / grid_size).round() * grid_size
+                    df_rsrp_target['grid_lat'] = (df_rsrp_target['Latitude'] / grid_size).round() * grid_size
+                    df_target_grouped = df_rsrp_target.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRP']].mean().reset_index()
+                    final_rsrp.extend([[round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRP']], 1)] for _, row in df_target_grouped.iterrows()])
+                    
+                data['mr_data'][env][source]['RSRP'] = final_rsrp
+
+            # RSRQ: Keep ALL spots for MDT, but ONLY bad spots for MR
+            if len(df_rsrq) > 0:
+                if source == 'MR':
+                    df_rsrq_target = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15].copy()
+                else:
+                    df_rsrq_target = df_rsrq.copy()
+                
+                final_rsrq = []
+                if len(df_rsrq_target) > 0:
+                    df_rsrq_target['grid_lon'] = (df_rsrq_target['Longitude'] / grid_size).round() * grid_size
+                    df_rsrq_target['grid_lat'] = (df_rsrq_target['Latitude'] / grid_size).round() * grid_size
+                    df_target_grouped = df_rsrq_target.groupby(['grid_lon', 'grid_lat'])[val_cols['RSRQ']].mean().reset_index()
+                    final_rsrq.extend([[round(row['grid_lon'], 5), round(row['grid_lat'], 5), round(row[val_cols['RSRQ']], 1)] for _, row in df_target_grouped.iterrows()])
+                    
+                data['mr_data'][env][source]['RSRQ'] = final_rsrq
             
     # Remove polygon object to make it JSON serializable
     del data['polygon']

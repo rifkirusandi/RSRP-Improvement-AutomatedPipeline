@@ -140,8 +140,10 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c; 
 }
 
-function openEditor(site) {
+function openEditor(site, isMarkerClick = false) {
     selectedSite = site;
+    selectedSite.isMarkerClick = isMarkerClick;
+    
     document.getElementById('editor-panel').style.display = 'block';
     document.getElementById('azimuth-slider').value = site.azimuth;
     document.getElementById('azimuth-val').innerText = site.azimuth;
@@ -158,7 +160,8 @@ function openEditor(site) {
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
-        document.getElementById('azimuth-slider').disabled = false;
+        document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
+        document.getElementById('azimuth-slider').disabled = isMarkerClick; // Cant rotate marker, only sector
         document.getElementById('existing-site-actions').style.display = 'none';
     }
 }
@@ -172,7 +175,7 @@ function setupEditorListeners() {
     document.getElementById('editor-close').addEventListener('click', closeEditor);
     
     document.getElementById('azimuth-slider').addEventListener('input', (e) => {
-        if (!selectedSite) return;
+        if (!selectedSite || selectedSite.isMarkerClick) return;
         selectedSite.azimuth = parseInt(e.target.value);
         document.getElementById('azimuth-val').innerText = selectedSite.azimuth;
         renderMap();
@@ -184,13 +187,24 @@ function setupEditorListeners() {
     document.getElementById('btn-delete-site').addEventListener('click', () => {
         if (!selectedSite) return;
         
-        // Remove from customSites
-        customSites = customSites.filter(s => s !== selectedSite);
-        
-        // Remove from DASHBOARD_DATA if it was original
-        let aptData = DASHBOARD_DATA[currentAirport];
-        if (aptData && aptData.sites) {
-            aptData.sites = aptData.sites.filter(s => s !== selectedSite);
+        if (selectedSite.isMarkerClick) {
+            // Remove ALL sectors with this site ID from customSites
+            customSites = customSites.filter(s => s.id !== selectedSite.id);
+            
+            // Remove ALL sectors with this site ID from DASHBOARD_DATA
+            let aptData = DASHBOARD_DATA[currentAirport];
+            if (aptData && aptData.sites) {
+                aptData.sites = aptData.sites.filter(s => s.id !== selectedSite.id);
+            }
+        } else {
+            // Remove ONLY this sector from customSites
+            customSites = customSites.filter(s => s !== selectedSite);
+            
+            // Remove ONLY this sector from DASHBOARD_DATA
+            let aptData = DASHBOARD_DATA[currentAirport];
+            if (aptData && aptData.sites) {
+                aptData.sites = aptData.sites.filter(s => s !== selectedSite);
+            }
         }
         
         closeEditor();
@@ -400,11 +414,11 @@ function renderMap() {
             site.lon = pos.lng;
             markEdited();
             renderMap();
-            if(selectedSite === site) openEditor(site);
+            if(selectedSite === site) openEditor(site, true);
         });
         
         marker.on('click', function(e) {
-            openEditor(site);
+            openEditor(site, true);
         });
     });
 

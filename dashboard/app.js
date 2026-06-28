@@ -38,30 +38,7 @@ function initMap() {
     
     document.getElementById('loading-screen').style.display = 'none';
     
-    // Right click map to add a new site
-    map.on('contextmenu', function(e) {
-        if (!currentAirport) return;
-        const lat = e.latlng.lat;
-        const lon = e.latlng.lng;
-        
-        const newSite = {
-            id: `MANUAL_ARPT_${Math.floor(Math.random() * 10000)}`,
-            lat: lat,
-            lon: lon,
-            azimuth: 0,
-            radius_m: 600,
-            beamwidth: 65,
-            remark: 'New Site',
-            type: 'proposed_new',
-            tlp_id: 'N/A',
-            tlp_name: 'N/A'
-        };
-        
-        customSites.added.push(newSite);
-        markEdited();
-        renderMap();
-        openEditor(newSite);
-    });
+    // Right click is handled globally at the end of the file now
 }
 
 function markEdited() {
@@ -620,6 +597,8 @@ function setupEditorListeners() {
     });
 }
 
+let globalActiveSites = [];
+
 function renderMap(forceCenter = false) {
     mrLayerGroup.clearLayers();
     siteLayerGroup.clearLayers();
@@ -667,6 +646,7 @@ function renderMap(forceCenter = false) {
     if (customSites.added) {
         activeSites = activeSites.concat(customSites.added);
     }
+    globalActiveSites = activeSites;
     
     // Draw Sites & Sectors
     activeSites.forEach(site => {
@@ -890,3 +870,158 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
 
+
+// Polygon Deletion Feature
+let polygonMode = false;
+let polygonPoints = [];
+let polygonLayer = null;
+let polygonLines = null;
+
+function isPointInPolygon(point, vs) {
+    let x = point[0], y = point[1];
+    let inside = false;
+    for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        let xi = vs[i][0], yi = vs[i][1];
+        let xj = vs[j][0], yj = vs[j][1];
+        let intersect = ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+document.getElementById('btn-polygon-delete').addEventListener('click', (e) => {
+    e.stopPropagation();
+    polygonMode = !polygonMode;
+    const btn = document.getElementById('btn-polygon-delete');
+    
+    if (polygonMode) {
+        btn.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
+        btn.innerHTML = 'Click Map to Draw Polygon<br>(Right-click to finish)';
+        document.getElementById('map').style.cursor = 'crosshair';
+        polygonPoints = [];
+        if (polygonLayer) map.removeLayer(polygonLayer);
+        if (polygonLines) map.removeLayer(polygonLines);
+    } else {
+        cancelPolygonMode();
+    }
+});
+
+function cancelPolygonMode() {
+    polygonMode = false;
+    const btn = document.getElementById('btn-polygon-delete');
+    btn.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
+    btn.innerHTML = '🗑️ Delete by Polygon';
+    document.getElementById('map').style.cursor = '';
+    if (polygonLayer) map.removeLayer(polygonLayer);
+    if (polygonLines) map.removeLayer(polygonLines);
+    polygonPoints = [];
+}
+
+map.on('click', (e) => {
+    if (!polygonMode) return;
+    
+    polygonPoints.push([e.latlng.lat, e.latlng.lng]);
+    
+    if (polygonLines) map.removeLayer(polygonLines);
+    polygonLines = L.polyline(polygonPoints, {color: '#e74c3c', weight: 3, dashArray: '5, 5'}).addTo(map);
+});
+
+let originalContextMenu = map.listens('contextmenu') ? true : false;
+
+map.on('contextmenu', (e) => {
+    if (!polygonMode) {
+        // Original manual add new site logic
+        if (!currentAirport) return;
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        
+        const newSite = {
+            id: 'MANUAL_ARPT_' + Math.floor(Math.random() * 10000),
+            lat: lat,
+            lon: lon,
+            azimuth: 0,
+            radius_m: 600,
+            beamwidth: 65,
+            remark: 'New Site',
+            type: 'proposed_new',
+            tlp_id: 'N/A',
+            tlp_name: 'N/A'
+        };
+        
+        customSites.added.push(newSite);
+        markEdited();
+        renderMap();
+        openEditor(newSite);
+        return;
+    }
+    
+    if (polygonPoints.length < 3) {
+        alert('You need at least 3 points to form a polygon!');
+        return;
+    }
+    
+    // Finish drawing
+    if (polygonLines) map.removeLayer(polygonLines);
+    polygonLayer = L.polygon(polygonPoints, {color: '#e74c3c', fillColor: '#e74c3c', fillOpacity: 0.2, weight: 3}).addTo(map);
+    
+    const vs = polygonPoints.map(p => [p[1], p[0]]); // [lon, lat] for raycasting
+    
+    let toDelete = [];
+    let uniqueBaseSites = new Set();
+    
+    globalActiveSites.forEach(site => {
+        if (isPointInPolygon([site.lon, site.lat], vs)) {
+            toDelete.push(site);
+            uniqueBaseSites.add(site.id);
+        }
+    });
+    
+    if (toDelete.length === 0) {
+        alert('No sites found inside the polygon.');
+        cancelPolygonMode();
+        return;
+    }
+    
+    const confirmDelete = confirm('Are you sure you want to delete ' + uniqueBaseSites.size + ' sites (' + toDelete.length + ' sectors) inside the polygon?');
+    
+    if (confirmDelete) {
+        let aptData = DASHBOARD_DATA[currentAirport];
+        
+        toDelete.forEach(site => {
+            if (site.type === 'proposed_new' || site.remark === 'Additional Sector') {
+                customSites.added = customSites.added.filter(s => s !== site);
+                
+                let originalSite = null;
+                if (aptData && aptData.sites) {
+                    if (site.original_azimuth === undefined) site.original_azimuth = site.azimuth;
+                    originalSite = aptData.sites.find(s => s.id === site.id && (s.original_azimuth !== undefined ? s.original_azimuth === site.original_azimuth : s.azimuth === site.original_azimuth));
+                }
+                if (originalSite) {
+                    if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+                    customSites.deleted.push(originalSite.id + '_' + originalSite.original_azimuth);
+                }
+            } else {
+                let originalSite = null;
+                if (aptData && aptData.sites) {
+                    if (site.original_azimuth === undefined) site.original_azimuth = site.azimuth;
+                    originalSite = aptData.sites.find(s => s.id === site.id && (s.original_azimuth !== undefined ? s.original_azimuth === site.original_azimuth : s.azimuth === site.original_azimuth));
+                }
+                if (originalSite) {
+                    if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+                    customSites.deleted.push(originalSite.id + '_' + originalSite.original_azimuth);
+                }
+            }
+        });
+        
+        markEdited();
+        renderMap();
+    }
+    
+    cancelPolygonMode();
+});
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && polygonMode) {
+        cancelPolygonMode();
+    }
+});

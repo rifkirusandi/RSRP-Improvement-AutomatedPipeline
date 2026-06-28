@@ -284,7 +284,8 @@ function setupEditorListeners() {
                 selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
             }
             
-            let baseRadius = selectedSite.clutter_radius || 600;
+            let oldIsHighGain = !selectedSite.isHighGain;
+            let baseRadius = selectedSite.clutter_radius || (oldIsHighGain ? selectedSite.radius_m / 1.2 : selectedSite.radius_m);
             selectedSite.radius_m = selectedSite.isHighGain ? (baseRadius * 1.2) : baseRadius;
             selectedSite.beamwidth = selectedSite.isHighGain ? 33 : 65;
             

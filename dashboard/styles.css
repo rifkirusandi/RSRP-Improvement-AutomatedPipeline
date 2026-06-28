@@ -176,3 +176,46 @@ select:focus {
 .marker.existing { background: #3498db; }
 .marker.proposed-new { background: #000000; border-radius: 2px; } /* Square for new sites */
 .marker.proposed-sector { background: #9b59b6; }
+
+
+/* Mobile Responsive Adjustments */
+@media (max-width: 768px) {
+    #ui-panel {
+        width: calc(100% - 40px);
+        max-height: 45vh;
+        left: 20px;
+        right: 20px;
+        top: 10px;
+        padding: 15px;
+    }
+    
+    #ui-panel h1 {
+        font-size: 16px;
+        margin-bottom: 15px;
+    }
+    
+    #editor-panel {
+        width: calc(100% - 40px);
+        left: 20px;
+        right: 20px;
+        bottom: 10px;
+        top: auto;
+        padding: 15px;
+        z-index: 2000;
+    }
+    
+    .legend-panel {
+        display: none !important; /* Hide legends on mobile to save screen space for the map */
+    }
+    
+    #new-site-modal {
+        width: calc(100% - 40px);
+        left: 20px;
+        right: 20px;
+        transform: translateY(-50%);
+    }
+    
+    .glass-panel {
+        padding: 15px;
+    }
+}

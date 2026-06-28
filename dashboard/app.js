@@ -890,6 +890,9 @@ function isPointInPolygon(point, vs) {
 }
 
 document.getElementById('btn-polygon-delete').addEventListener('click', (e) => {
+    alert('This Feature is Under Development');
+    return;
+    
     e.stopPropagation();
     polygonMode = !polygonMode;
     const btn = document.getElementById('btn-polygon-delete');

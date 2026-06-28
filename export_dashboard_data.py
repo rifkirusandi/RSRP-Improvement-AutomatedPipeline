@@ -212,12 +212,9 @@ for airport_name, data in airports.items():
                     
                 data['mr_data'][env][source]['RSRP'] = final_rsrp
 
-            # RSRQ: Keep ALL spots for MDT, but ONLY bad spots for MR
+            # RSRQ: Keep ALL spots for both MDT and MR inside bbox
             if len(df_rsrq) > 0:
-                if source == 'MR':
-                    df_rsrq_target = df_rsrq[df_rsrq[val_cols['RSRQ']] < -15].copy()
-                else:
-                    df_rsrq_target = df_rsrq.copy()
+                df_rsrq_target = df_rsrq.copy()
                 
                 final_rsrq = []
                 if len(df_rsrq_target) > 0:

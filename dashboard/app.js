@@ -876,7 +876,6 @@ let polygonMode = false;
 let polygonPoints = [];
 let polygonLayer = null;
 let polygonLines = null;
-let isDrawingLasso = false;
 
 function isPointInPolygon(point, vs) {
     let x = point[0], y = point[1];
@@ -897,9 +896,8 @@ document.getElementById('btn-polygon-delete').addEventListener('click', (e) => {
     
     if (polygonMode) {
         btn.style.background = 'linear-gradient(135deg, #f39c12, #e67e22)';
-        btn.innerHTML = 'Click & Drag to Draw Lasso<br>(Release to finish)';
+        btn.innerHTML = 'Click points to draw area<br>(Right-click to finish)';
         document.getElementById('map').style.cursor = 'crosshair';
-        map.dragging.disable(); // Stop map from panning while lassoing
         polygonPoints = [];
         if (polygonLayer) map.removeLayer(polygonLayer);
         if (polygonLines) map.removeLayer(polygonLines);
@@ -910,42 +908,53 @@ document.getElementById('btn-polygon-delete').addEventListener('click', (e) => {
 
 function cancelPolygonMode() {
     polygonMode = false;
-    isDrawingLasso = false;
     const btn = document.getElementById('btn-polygon-delete');
     btn.style.background = 'linear-gradient(135deg, #e74c3c, #c0392b)';
     btn.innerHTML = '🗑️ Delete by Polygon';
     document.getElementById('map').style.cursor = '';
-    map.dragging.enable(); // Re-enable panning
     if (polygonLayer) map.removeLayer(polygonLayer);
     if (polygonLines) map.removeLayer(polygonLines);
     polygonPoints = [];
 }
 
-map.on('mousedown', (e) => {
+map.on('click', (e) => {
     if (!polygonMode) return;
     
-    isDrawingLasso = true;
-    polygonPoints = [[e.latlng.lat, e.latlng.lng]];
+    polygonPoints.push([e.latlng.lat, e.latlng.lng]);
     
-    if (polygonLayer) map.removeLayer(polygonLayer);
     if (polygonLines) map.removeLayer(polygonLines);
     polygonLines = L.polyline(polygonPoints, {color: '#e74c3c', weight: 3, dashArray: '5, 5'}).addTo(map);
 });
 
-map.on('mousemove', (e) => {
-    if (!polygonMode || !isDrawingLasso) return;
-    polygonPoints.push([e.latlng.lat, e.latlng.lng]);
-    polygonLines.setLatLngs(polygonPoints);
-});
-
-map.on('mouseup', (e) => {
-    if (!polygonMode || !isDrawingLasso) return;
-    isDrawingLasso = false;
+map.on('contextmenu', (e) => {
+    if (!polygonMode) {
+        // Original manual add new site logic
+        if (!currentAirport) return;
+        const lat = e.latlng.lat;
+        const lon = e.latlng.lng;
+        
+        const newSite = {
+            id: 'MANUAL_ARPT_' + Math.floor(Math.random() * 10000),
+            lat: lat,
+            lon: lon,
+            azimuth: 0,
+            radius_m: 600,
+            beamwidth: 65,
+            remark: 'New Site',
+            type: 'proposed_new',
+            tlp_id: 'N/A',
+            tlp_name: 'N/A'
+        };
+        
+        customSites.added.push(newSite);
+        markEdited();
+        renderMap();
+        openEditor(newSite);
+        return;
+    }
     
     if (polygonPoints.length < 3) {
-        // Just clicked, didn't drag much
-        alert('You need to click and drag to draw a selection area!');
-        cancelPolygonMode();
+        alert('You need to click at least 3 points to form a polygon!');
         return;
     }
     
@@ -1007,33 +1016,6 @@ map.on('mouseup', (e) => {
     }
     
     cancelPolygonMode();
-});
-
-map.on('contextmenu', (e) => {
-    if (polygonMode) return; // Ignore right click if in polygon mode
-    
-    // Original manual add new site logic
-    if (!currentAirport) return;
-    const lat = e.latlng.lat;
-    const lon = e.latlng.lng;
-    
-    const newSite = {
-        id: 'MANUAL_ARPT_' + Math.floor(Math.random() * 10000),
-        lat: lat,
-        lon: lon,
-        azimuth: 0,
-        radius_m: 600,
-        beamwidth: 65,
-        remark: 'New Site',
-        type: 'proposed_new',
-        tlp_id: 'N/A',
-        tlp_name: 'N/A'
-    };
-    
-    customSites.added.push(newSite);
-    markEdited();
-    renderMap();
-    openEditor(newSite);
 });
 
 document.addEventListener('keydown', (e) => {

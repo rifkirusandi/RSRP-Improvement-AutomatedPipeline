@@ -148,7 +148,7 @@ function openEditor(site, isMarkerClick = false) {
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
-        document.getElementById('azimuth-slider').disabled = isMarkerClick; // Cant rotate marker
+        document.getElementById('azimuth-slider').disabled = isMarkerClick || isChangeAntenna || (site.type === 'existing'); // Cant rotate marker or existing high gain
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
         document.getElementById('btn-add-sector').style.display = 'none'; // Hide for new sites
     }
@@ -202,7 +202,7 @@ function setupEditorListeners() {
         renderMap();
         markEdited();
     });
-    
+
     // Remark select listener removed because the dropdown was changed to a disabled input field
     
     document.getElementById('btn-delete-site').addEventListener('click', () => {
@@ -477,21 +477,133 @@ function setupEditorListeners() {
         renderMap();
         alert("All edits have been reset to the base version.");
     });
+    
+    const resetAllBtn = document.getElementById('btn-reset-all');
+    if (resetAllBtn) {
+        resetAllBtn.addEventListener('click', () => {
+            document.getElementById('btn-reset-edits').click();
+        });
+    }
 
     document.getElementById('btn-trigger-save').addEventListener('click', () => {
+        if (!currentAirport) {
+            alert('Please select an airport first.');
+            return;
+        }
+        
+        // Build FULL list of proposed sites for this airport (base + edits)
+        let finalSites = [];
+        const aptData = DASHBOARD_DATA[currentAirport];
+        
+        // 1. Add base proposals that haven't been deleted
+        if (aptData && aptData.sites) {
+            aptData.sites.forEach(s => {
+                if (s.type !== 'existing' || s.remark === 'Change Antenna') {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
+                    
+                    // Skip if deleted
+                    if (customSites.deleted && customSites.deleted.includes(sig)) return;
+                    
+                    // Skip if changed antenna (since it's replaced by an 'added' sector)
+                    const replacedByChange = customSites.added && customSites.added.some(add => 
+                        add.remark === 'Change Antenna' && add.id.replace('_CHG', '') === s.id && add.original_azimuth === baseAz
+                    );
+                    if (replacedByChange) return;
+                    
+                    // Apply modifications if any
+                    let finalSite = { ...s };
+                    if (customSites.modified && customSites.modified[sig]) {
+                        finalSite = { ...finalSite, ...customSites.modified[sig] };
+                    }
+                    
+                    // Force type to proposed_sector for system-generated Change Antennas
+                    if (finalSite.remark === 'Change Antenna') {
+                        finalSite.type = 'proposed_sector';
+                    }
+                    
+                    finalSites.push(finalSite);
+                }
+            });
+        }
+        
+        // 2. Add newly created proposals
+        if (customSites.added) {
+            finalSites.push(...customSites.added);
+        }
+
         const payload = {
             airport: currentAirport,
-            edited_sites: customSites
+            sites: finalSites,
+            bbox: [
+                DASHBOARD_DATA[currentAirport].bbox.minx,
+                DASHBOARD_DATA[currentAirport].bbox.miny,
+                DASHBOARD_DATA[currentAirport].bbox.maxx,
+                DASHBOARD_DATA[currentAirport].bbox.maxy
+            ]
         };
         
-        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(payload, null, 2));
-        const dlAnchorElem = document.createElement('a');
-        dlAnchorElem.setAttribute("href", dataStr);
-        dlAnchorElem.setAttribute("download", `Edits_Only_${currentAirport.replace(/\s+/g, '_')}.json`);
-        dlAnchorElem.click();
+        document.getElementById('btn-trigger-save').innerHTML = 'Saving & Generating PPTX (Wait ~15s)...';
         
-        document.getElementById('save-banner').style.display = 'none';
-        editedStateChanged = false;
+        fetch('/api/save_edits', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => res.json())
+        .then(data => {
+            alert(data.message || 'Edits saved successfully!');
+            document.getElementById('btn-trigger-save').innerHTML = '💾 Save to Server';
+            editedStateChanged = false;
+        })
+        .catch(err => {
+            alert('Error saving to server. Are you running app.py?');
+            document.getElementById('btn-trigger-save').innerHTML = '💾 Save to Server';
+        });
+    });
+
+    document.getElementById('btn-export-pptx').addEventListener('click', () => {
+        if (!currentAirport) {
+            alert('Please select an airport first.');
+            return;
+        }
+        window.open('/api/download/pptx/' + encodeURIComponent(currentAirport), '_blank');
+    });
+
+    document.getElementById('pkl-upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        document.getElementById('btn-load-pkl').innerHTML = 'Loading...';
+        
+        fetch('/api/load_pkl', {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.status === 'success') {
+                customSitesMap = data.data;
+                localStorage.setItem('rsrp_custom_sites', JSON.stringify(customSitesMap));
+                if (currentAirport) {
+                    customSites = customSitesMap[currentAirport] || { added: [], deleted: [], modified: {} };
+                }
+                renderMap();
+                alert('Progress loaded successfully from .pkl!');
+            } else {
+                alert(data.error || 'Failed to load progress.');
+            }
+            document.getElementById('btn-load-pkl').innerHTML = '📂 Load .pkl';
+            e.target.value = ''; // Reset input
+        })
+        .catch(err => {
+            alert('Error loading file. Are you running app.py?');
+            document.getElementById('btn-load-pkl').innerHTML = '📂 Load .pkl';
+            e.target.value = '';
+        });
     });
 
     document.getElementById('btn-export-csv').addEventListener('click', () => {
@@ -845,6 +957,30 @@ document.getElementById('btn-save-session').addEventListener('click', () => {
     alert('Session saved successfully! Your edits will be available even if you reload the page.');
 });
 
+document.getElementById('btn-regenerate-system').addEventListener('click', () => {
+    if (!confirm("Are you sure you want to run the full pipeline to regenerate system proposals? This will take 5-10 minutes and overwrite any previous system baseline.")) return;
+    
+    document.getElementById('btn-regenerate-system').innerHTML = '⚙️ Running Pipeline...';
+    document.getElementById('btn-regenerate-system').disabled = true;
+    
+    fetch('/api/regenerate', { method: 'POST' })
+    .then(res => res.json())
+    .then(data => {
+        if (data.status === 'success') {
+            alert('Pipeline completed successfully! Please refresh the page to load the new data.');
+        } else {
+            alert('Error running pipeline: ' + data.error);
+        }
+        document.getElementById('btn-regenerate-system').innerHTML = '⚙️ Run Full Pipeline';
+        document.getElementById('btn-regenerate-system').disabled = false;
+    })
+    .catch(err => {
+        alert('Error: ' + err);
+        document.getElementById('btn-regenerate-system').innerHTML = '⚙️ Run Full Pipeline';
+        document.getElementById('btn-regenerate-system').disabled = false;
+    });
+});
+
 document.addEventListener('DOMContentLoaded', () => {
     const saved = localStorage.getItem('rsrp_custom_sites');
     if (saved) {
@@ -864,6 +1000,24 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     renderMap(true);
+
+    // Autosave Loop (Runs every 15 seconds)
+    setInterval(() => {
+        if (editedStateChanged) {
+            if (currentAirport) customSitesMap[currentAirport] = customSites;
+            
+            fetch('/api/autosave', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(customSitesMap)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if(data.status === 'success') console.log('Autosaved to .pkl');
+            })
+            .catch(err => console.log('Autosave failed. Server offline?'));
+        }
+    }, 15000);
 });
 
 

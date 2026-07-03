@@ -1,0 +1,36 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Workspace artifacts and tasks
+task.json
+task.md
+implementation_plan.md
+walkthrough.md
+build_deliverable.ps1
+
+# GIS & Measurement Data (Heavy raw datasets)
+Input_Data/
+
+# Output reports & Evidence
+Output/
+Evidence/
+*.pkl
+*.xlsx
+*.parquet
+
+# Environment variables
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db

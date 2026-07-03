@@ -1,0 +1,17 @@
+pandas
+geopandas
+shapely
+fiona
+pyshp
+openpyxl
+scikit-learn
+matplotlib
+contextily
+python-pptx
+pyproj
+fastapi
+uvicorn
+pydantic
+pytest
+httpx
+python-multipart

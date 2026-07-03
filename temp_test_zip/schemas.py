@@ -6,8 +6,8 @@ class SiteEditRequest(BaseModel):
     type: str
     lat: float
     lon: float
-    azimuth: float
-    radius_m: Optional[float] = 600
+    azimuth: int
+    radius_m: Optional[int] = 600
     remark: Optional[str] = 'New Site'
     tlp_id: Optional[str] = 'N/A'
     tlp_name: Optional[str] = 'N/A'

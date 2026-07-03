@@ -322,8 +322,6 @@ function setupEditorListeners() {
             
             if (selectedSite.type === 'proposed_new') {
                 selectedSite.remark = selectedSite.isHighGain ? 'New Site (High Gain)' : 'New Site';
-            } else if (selectedSite.remark.includes('Additional Sector')) {
-                selectedSite.remark = selectedSite.isHighGain ? 'Additional Sector (High Gain)' : 'Additional Sector';
             }
             
             // Fix: Use strict immutable cache rather than compounding active state
@@ -573,17 +571,16 @@ function setupEditorListeners() {
         // 1. Add base proposals that haven't been deleted
         if (aptData && aptData.sites) {
             aptData.sites.forEach(s => {
-                const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
-                const sig = `${s.id}_${baseAz}`;
-                const isModified = customSites.modified && customSites.modified[sig] !== undefined;
-                
-                if (s.type !== 'existing' || s.remark === 'Change Antenna' || isModified) {
+                if (s.type !== 'existing' || s.remark === 'Change Antenna') {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
+                    
                     // Skip if deleted
                     if (customSites.deleted && customSites.deleted.includes(sig)) return;
                     
                     // Apply modifications if any
                     let finalSite = { ...s };
-                    if (isModified) {
+                    if (customSites.modified && customSites.modified[sig]) {
                         finalSite = { ...finalSite, ...customSites.modified[sig] };
                     }
                     
@@ -732,14 +729,12 @@ function setupEditorListeners() {
         const aptData = DASHBOARD_DATA[currentAirport];
         if (aptData && aptData.sites) {
             aptData.sites.forEach(s => {
-                const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
-                const sig = `${s.id}_${baseAz}`;
-                const isModified = customSites.modified && customSites.modified[sig] !== undefined;
-                
-                if (s.type !== 'existing' || s.remark === 'Change Antenna' || isModified) {
+                if (s.type !== 'existing' || s.remark === 'Change Antenna') {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
                     if (customSites.deleted && customSites.deleted.includes(sig)) return;
                     let finalSite = { ...s };
-                    if (isModified) finalSite = { ...finalSite, ...customSites.modified[sig] };
+                    if (customSites.modified && customSites.modified[sig]) finalSite = { ...finalSite, ...customSites.modified[sig] };
                     if (finalSite.remark === 'Change Antenna') finalSite.type = 'proposed_sector';
                     finalSites.push(finalSite);
                 }

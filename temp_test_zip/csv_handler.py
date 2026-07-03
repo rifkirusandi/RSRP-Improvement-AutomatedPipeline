@@ -92,8 +92,8 @@ def export_airport_csv(airport_name: str, bbox: tuple):
         
     # Apply Proposals
     for _, row in df_pr.iterrows():
-        remark = str(row.get('Remark', '')).strip()
-        site_id = str(row.get('Site ID', '')).strip()
+        remark = str(row.get('Remark', ''))
+        site_id = str(row.get('Site ID', ''))
         azimuth = row.get('Azimuth', 0)
         radius = row.get('Radius', 975)
         
@@ -231,8 +231,8 @@ def import_airport_csv(airport_name: str, csv_content: bytes):
     
     # Process rows
     for _, row in df_in.iterrows():
-        remark = str(row.get('Remark', '')).strip()
-        site_id = str(row.get('Site ID', '')).strip()
+        remark = str(row.get('Remark', ''))
+        site_id = str(row.get('Site ID', ''))
         az = float(row.get('Azimuth', 0))
         lat = float(row.get('Latitude', 0))
         lon = float(row.get('Longitude', 0))
@@ -248,11 +248,8 @@ def import_airport_csv(airport_name: str, csv_content: bytes):
             # Ignore completely, don't write to modified
             continue
             
-        # Ensure az is treated as int for the signature to match JS (e.g., 135 instead of 135.0)
-        az_int = int(az) if az.is_integer() else az
-        
         if remark == 'Change Antenna':
-            modified[f"{site_id}_{az_int}"] = {
+            modified[f"{site_id}_{az}"] = {
                 'id': site_id,
                 'azimuth': az,
                 'remark': 'Change Antenna',
@@ -264,18 +261,16 @@ def import_airport_csv(airport_name: str, csv_content: bytes):
             # Usually we don't have a direct 'IBC2M' edit in customSites modified, 
             # but we can track it as a sector change if needed.
             pass
-        elif remark in ['New Site', 'New Site (High Gain)', 'Additional Sector', 'Additional Sector (High Gain)', 'IBC2M Sector']:
-            is_hg = '(High Gain)' in remark
+        elif remark in ['New Site', 'Additional Sector', 'IBC2M Sector']:
             added.append({
                 'id': site_id,
                 'lat': lat,
                 'lon': lon,
                 'azimuth': az,
                 'remark': remark,
-                'isHighGain': is_hg,
-                'type': 'proposed_new' if 'New Site' in remark else 'proposed_sector',
-                'radius_m': radius_m * 1.2 if is_hg else radius_m,
-                'beamwidth': 33 if is_hg else 65,
+                'type': 'proposed_new' if remark == 'New Site' else 'proposed_sector',
+                'radius_m': radius_m,
+                'beamwidth': 65,
                 'tlp_id': 'N/A',
                 'tlp_name': 'N/A'
             })

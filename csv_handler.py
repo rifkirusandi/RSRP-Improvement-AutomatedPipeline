@@ -58,6 +58,9 @@ def export_airport_csv(airport_name: str, bbox: tuple):
     )
     df_ex = df_ex[mask_ex].copy()
     
+    df_ex['Azimuth'] = pd.to_numeric(df_ex['Azimuth'], errors='coerce').fillna(0)
+    df_ex.drop_duplicates(subset=['Site ID', 'Azimuth'], keep='first', inplace=True)
+    
     if os.path.exists(PROPOSALS_XLSX):
         df_pr = pd.read_excel(PROPOSALS_XLSX)
     else:

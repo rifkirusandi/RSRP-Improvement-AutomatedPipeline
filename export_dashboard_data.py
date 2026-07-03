@@ -87,6 +87,8 @@ df_cells = pd.read_csv(SITES_CSV)
 df_cells['Longitude'] = pd.to_numeric(df_cells['Longitude'], errors='coerce')
 df_cells['Latitude'] = pd.to_numeric(df_cells['Latitude'], errors='coerce')
 df_cells = df_cells.dropna(subset=['Longitude', 'Latitude'])
+df_cells['Azimuth'] = pd.to_numeric(df_cells['Azimuth'], errors='coerce').fillna(0)
+df_cells.drop_duplicates(subset=['Site ID', 'Azimuth'], keep='first', inplace=True)
 
 # Load Proposals
 print("Loading proposed sites...")
@@ -95,9 +97,20 @@ if PROPOSALS_FILE.endswith('.parquet'):
 else:
     df_prop = pd.read_excel(PROPOSALS_FILE, sheet_name=0)
 
+# Load TLP Data
+print("Loading TLP Data...")
+df_tlp = pd.read_csv(r"Input_Data\TLP\tlp_nationwide.csv", encoding='ISO-8859-1', low_memory=False)
+df_tlp['Longitude'] = pd.to_numeric(df_tlp['Longitude'], errors='coerce')
+df_tlp['Latitude'] = pd.to_numeric(df_tlp['Latitude'], errors='coerce')
+df_tlp = df_tlp.dropna(subset=['Longitude', 'Latitude'])
+gdf_tlp = gpd.GeoDataFrame(df_tlp, geometry=gpd.points_from_xy(df_tlp['Longitude'], df_tlp['Latitude']), crs='EPSG:4326')
+gdf_tlp_3857 = gdf_tlp.to_crs(epsg=3857)
+
 for airport_name, data in airports.items():
     print(f"Processing {airport_name}...")
     minx, miny, maxx, maxy = data['bbox']
+    
+    data['tlp_points'] = []
     
     # Existing sites in bounds
     mask_ex = (
@@ -228,6 +241,17 @@ for airport_name, data in airports.items():
     import shapely.geometry
     poly_4326 = gpd.GeoSeries([data['polygon']], crs="EPSG:3857").to_crs(epsg=4326).iloc[0]
     data['geojson'] = shapely.geometry.mapping(poly_4326)
+    
+    # Process TLP Buffer
+    buffered_1300m = data['polygon'].buffer(1300)
+    tlp_in_buffer = gdf_tlp_3857[gdf_tlp_3857.geometry.within(buffered_1300m)]
+    
+    for _, row in tlp_in_buffer.iterrows():
+        data['tlp_points'].append({
+            'lat': round(float(row['Latitude']), 5),
+            'lon': round(float(row['Longitude']), 5),
+            'name': str(row.get('Tower Provider Name', 'Unknown TLP'))
+        })
     
     # Remove original shapely object
     del data['polygon']

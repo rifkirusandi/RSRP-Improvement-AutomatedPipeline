@@ -13,6 +13,9 @@ import threading
 import webbrowser
 from schemas import SaveEditsRequest, ProcessLogRequest
 import contextlib
+import re
+import uvicorn
+from csv_handler import export_airport_csv, import_airport_csv
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROPOSALS_XLSX = os.path.join(SCRIPT_DIR, 'Output', 'All_Airports_Proposals.xlsx')
@@ -204,9 +207,57 @@ async def download_pptx(airport_name: str):
         
     return FileResponse(file_path, filename=f"{airport_name}_Airport_Improvement.pptx")
 
-@app.get('/api/download/excel')
-async def download_excel():
-    return FileResponse(os.path.join(SCRIPT_DIR, 'Output', 'All_Airports_Proposals.xlsx'), filename='All_Airports_Proposals.xlsx')
+@app.get('/api/export_csv/{airport_name}')
+async def export_csv(airport_name: str):
+    # Retrieve bounding box from dashboard data
+    try:
+        with open(DASHBOARD_DATA, 'r', encoding='utf-8') as f:
+            content = f.read()
+        json_str = re.search(r'const DASHBOARD_DATA = (\{.*?\});', content, re.DOTALL).group(1)
+        data = json.loads(json_str)
+        if airport_name not in data:
+            raise HTTPException(status_code=404, detail="Airport not found")
+        bbox = data[airport_name]['bbox']
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read bbox: {e}")
+        
+    return export_airport_csv(airport_name, bbox)
+
+@app.post('/api/import_csv/{airport_name}')
+async def import_csv(airport_name: str, file: UploadFile = File(...)):
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="Invalid file type. Must be .csv")
+    content = await file.read()
+    try:
+        added, modified = import_airport_csv(airport_name, content)
+        
+        # Load current autosave state to merge
+        autosave_path = os.path.join(SCRIPT_DIR, 'Output', 'autosave.pkl')
+        custom_sites = {}
+        if os.path.exists(autosave_path):
+            with open(autosave_path, 'rb') as f:
+                custom_sites = pickle.load(f)
+                
+        if airport_name not in custom_sites:
+            custom_sites[airport_name] = {'added': [], 'deleted': [], 'modified': {}}
+            
+        # Overwrite exactly as requested
+        custom_sites[airport_name]['added'] = added
+        custom_sites[airport_name]['modified'] = modified
+        custom_sites[airport_name]['deleted'] = []
+        
+        # Save back to autosave.pkl
+        with open(autosave_path, 'wb') as f:
+            pickle.dump(custom_sites, f)
+            
+        return JSONResponse({
+            "status": "success", 
+            "message": f"Successfully imported {len(added)} new sites and {len(modified)} modifications.",
+            "added": added,
+            "modified": modified
+        })
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Import failed: {e}")
 
 @app.post('/api/regenerate')
 async def regenerate():

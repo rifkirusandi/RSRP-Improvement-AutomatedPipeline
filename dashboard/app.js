@@ -9,6 +9,7 @@ let map;
 let mrLayerGroup = L.layerGroup();
 let siteLayerGroup = L.layerGroup();
 let sectorLayerGroup = L.layerGroup();
+let tlpLayerGroup = L.layerGroup();
 let customSitesMap = {}; // { 'AirportName': { added: [], deleted: [], modified: {} } }
 let customSites = { added: [], deleted: [], modified: {} }; // Active diff for current airport
 let editedStateChanged = false;
@@ -28,27 +29,35 @@ function initMap() {
         maxZoom: 19
     }).addTo(map);
 
-    // Enforce Layer Z-Index
-    map.createPane('mrPane');
-    map.getPane('mrPane').style.zIndex = 400; // Bottom layer
-
-    map.createPane('polyPane');
-    map.getPane('polyPane').style.zIndex = 410; // Middle layer
-
-    map.createPane('sectorPane');
-    map.getPane('sectorPane').style.zIndex = 420; // Top layer
+    // Enforce Layer Z-Index Hierarchy
+    map.createPane('gridPane');
+    map.getPane('gridPane').style.zIndex = 400; // Base RSRP/RSRQ grid matrix
     
-    map.createPane('sitePane');
-    map.getPane('sitePane').style.zIndex = 430; // Topmost layer
+    map.createPane('airportPane');
+    map.getPane('airportPane').style.zIndex = 410; // Airport Polygon outline
+
+    map.createPane('existingPane');
+    map.getPane('existingPane').style.zIndex = 420; // Existing Sites layer
+    map.createPane('existingMarkerPane');
+    map.getPane('existingMarkerPane').style.zIndex = 425; // Existing Sites Markers
+
+    map.createPane('proposalPane');
+    map.getPane('proposalPane').style.zIndex = 430; // All Proposals layer
+    map.createPane('proposalMarkerPane');
+    map.getPane('proposalMarkerPane').style.zIndex = 435; // All Proposals Markers
+    
+    map.createPane('tlpPane');
+    map.getPane('tlpPane').style.zIndex = 440; // TLP Points layer
 
     map.createPane('deletePane');
-    map.getPane('deletePane').style.zIndex = 440; // Absolute top layer for selection circles
+    map.getPane('deletePane').style.zIndex = 450; // Selection circles (Absolute top)
 
     L.control.zoom({ position: 'bottomright' }).addTo(map);
 
     mrLayerGroup.addTo(map);
     sectorLayerGroup.addTo(map);
     siteLayerGroup.addTo(map);
+    tlpLayerGroup.addTo(map);
 
     populateAirportDropdown();
     
@@ -79,20 +88,32 @@ async function populateAirportDropdown() {
             return;
         }
 
-        sortedAirports.forEach((apt, index) => {
-            // Only add if it actually exists in DASHBOARD_DATA
+        const lastImported = localStorage.getItem('last_imported_airport');
+        
+        sortedAirports.forEach((apt) => {
             if (DASHBOARD_DATA[apt]) {
                 const option = document.createElement('option');
                 option.value = apt;
                 option.textContent = apt;
                 select.appendChild(option);
-                
-                if (index === 0 && !currentAirport) currentAirport = apt;
             }
         });
         
-        if (!currentAirport && sortedAirports.length > 0) {
+        if (lastImported && DASHBOARD_DATA[lastImported]) {
+            currentAirport = lastImported;
+            select.value = currentAirport;
+            localStorage.removeItem('last_imported_airport');
+        } else if (!currentAirport && sortedAirports.length > 0) {
             currentAirport = sortedAirports[0];
+            select.value = currentAirport;
+        }
+        
+        // Ensure state is loaded and map is rendered
+        if (currentAirport) {
+            customSites = customSitesMap[currentAirport] || { added: [], deleted: [], modified: {} };
+            editedStateChanged = customSites.added.length > 0 || customSites.deleted.length > 0 || Object.keys(customSites.modified).length > 0;
+            document.getElementById('save-banner').style.display = editedStateChanged ? 'flex' : 'none';
+            renderMap(true);
         }
         
     } catch (error) {
@@ -382,22 +403,24 @@ function setupEditorListeners() {
 
         const initialRadius = selectedSite.initial_radius !== undefined ? selectedSite.initial_radius : (selectedSite.clutter_radius || selectedSite.radius_m || 600);
         
-        const changedSite = {
-            id: selectedSite.id + "_CHG",
-            lat: selectedSite.lat,
-            lon: selectedSite.lon,
-            azimuth: targetAzimuth,
-            original_azimuth: targetAzimuth,
-            initial_radius: initialRadius,
-            radius_m: initialRadius * 1.2, // Strict 20% increase from immutable baseline
-            clutter_radius: selectedSite.clutter_radius || 600,
-            beamwidth: 33,
-            remark: 'Change Antenna',
-            type: 'proposed_sector',
-            tlp_id: 'N/A',
-            tlp_name: 'N/A'
-        };
-        customSites.added.push(changedSite);
+        let originalSite = null;
+        if (aptData && aptData.sites) {
+            if (selectedSite.original_azimuth === undefined) selectedSite.original_azimuth = selectedSite.azimuth;
+            originalSite = aptData.sites.find(s => s.id === selectedSite.id && (s.original_azimuth !== undefined ? s.original_azimuth === selectedSite.original_azimuth : s.azimuth === selectedSite.original_azimuth));
+        }
+        
+        if (originalSite) {
+            if (originalSite.original_azimuth === undefined) originalSite.original_azimuth = originalSite.azimuth;
+            const sig = `${originalSite.id}_${originalSite.original_azimuth}`;
+            if (!customSites.modified[sig]) customSites.modified[sig] = {};
+            customSites.modified[sig].isHighGain = true;
+            customSites.modified[sig].remark = 'Change Antenna';
+            customSites.modified[sig].radius_m = initialRadius * 1.2;
+            customSites.modified[sig].beamwidth = 33;
+            // Force type visualization
+            customSites.modified[sig].type = 'proposed_sector';
+        }
+        
         markEdited();
         renderMap();
         closeEditor();
@@ -555,12 +578,6 @@ function setupEditorListeners() {
                     // Skip if deleted
                     if (customSites.deleted && customSites.deleted.includes(sig)) return;
                     
-                    // Skip if changed antenna (since it's replaced by an 'added' sector)
-                    const replacedByChange = customSites.added && customSites.added.some(add => 
-                        add.remark === 'Change Antenna' && add.id.replace('_CHG', '') === s.id && add.original_azimuth === baseAz
-                    );
-                    if (replacedByChange) return;
-                    
                     // Apply modifications if any
                     let finalSite = { ...s };
                     if (customSites.modified && customSites.modified[sig]) {
@@ -585,12 +602,7 @@ function setupEditorListeners() {
         const payload = {
             airport: currentAirport,
             sites: finalSites,
-            bbox: [
-                DASHBOARD_DATA[currentAirport].bbox.minx,
-                DASHBOARD_DATA[currentAirport].bbox.miny,
-                DASHBOARD_DATA[currentAirport].bbox.maxx,
-                DASHBOARD_DATA[currentAirport].bbox.maxy
-            ]
+            bbox: DASHBOARD_DATA[currentAirport].bbox
         };
         
         document.getElementById('btn-trigger-save').innerHTML = 'Saving...';
@@ -704,132 +716,107 @@ function setupEditorListeners() {
     });
 
     document.getElementById('btn-export-csv').addEventListener('click', () => {
+        if (!currentAirport) {
+            alert('Please select an airport first.');
+            return;
+        }
+        
         // Sync current airport edits before exporting
         if (currentAirport) customSitesMap[currentAirport] = customSites;
         
-        const choice = prompt("What do you want to export across ALL airports?\n\n1 = All Sites (Existing + Edited/New)\n2 = Edited/New Sites Only\n\nType 1 or 2:");
-        if (!choice) return; // Cancelled
-        const isAll = choice.trim() === '1';
-        if (!isAll && choice.trim() !== '2') {
-            alert("Invalid choice. Export cancelled.");
+        // Build FULL list of proposed sites for this airport (base + edits)
+        let finalSites = [];
+        const aptData = DASHBOARD_DATA[currentAirport];
+        if (aptData && aptData.sites) {
+            aptData.sites.forEach(s => {
+                if (s.type !== 'existing' || s.remark === 'Change Antenna') {
+                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
+                    const sig = `${s.id}_${baseAz}`;
+                    if (customSites.deleted && customSites.deleted.includes(sig)) return;
+                    let finalSite = { ...s };
+                    if (customSites.modified && customSites.modified[sig]) finalSite = { ...finalSite, ...customSites.modified[sig] };
+                    if (finalSite.remark === 'Change Antenna') finalSite.type = 'proposed_sector';
+                    finalSites.push(finalSite);
+                }
+            });
+        }
+        if (customSites.added) finalSites.push(...customSites.added);
+
+        // Save to backend automatically first to ensure export is up to date
+        const payload = {
+            airport: currentAirport,
+            sites: finalSites,
+            bbox: DASHBOARD_DATA[currentAirport].bbox
+        };
+        
+        const btn = document.getElementById('btn-export-csv');
+        const originalText = btn.innerHTML;
+        btn.innerHTML = 'Saving & Exporting...';
+        btn.disabled = true;
+        
+        fetch('/api/save_edits', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        })
+        .then(res => {
+            if (!res.ok) throw new Error('Save failed');
+            return fetch(`/api/export_csv/${encodeURIComponent(currentAirport)}`);
+        })
+        .then(res => res.blob())
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${currentAirport}-Proposals.csv`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        })
+        .catch(err => alert(err.message))
+        .finally(() => {
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        });
+    });
+
+    document.getElementById('csv-upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!currentAirport) {
+            alert("Please select an airport first!");
             return;
         }
-
-        let csvContent = "data:text/csv;charset=utf-8,";
-        csvContent += "Airport,ID,Latitude,Longitude,Azimuth,Radius_m,Beamwidth,Type,Remark,Clutter\n";
-            
-            function getClutterName(radius) {
-                let r = Number(radius);
-                if (r === 400) return "DENSE URBAN";
-                if (r === 600) return "URBAN";
-                if (r === 1000) return "SUB URBAN";
-                if (r === 2000) return "RURAL";
-                // Fallback for custom slider radiuses
-                if (r <= 500) return "DENSE URBAN";
-                if (r <= 800) return "URBAN";
-                if (r <= 1500) return "SUB URBAN";
-                return "RURAL";
-            }
         
-        for (const aptName in DASHBOARD_DATA) {
-            const aptData = DASHBOARD_DATA[aptName];
-            const aptCustom = customSitesMap[aptName] || { added: [], deleted: [], modified: {} };
-            
-            const hasEdits = aptCustom.added.length > 0 || aptCustom.deleted.length > 0 || Object.keys(aptCustom.modified).length > 0;
-            if (!isAll && !hasEdits) continue; // Skip airports with no edits if they want edited only
-            
-            let sitesToExport = [];
-            
-            if (isAll) {
-                // Apply diffs to base
-                (aptData.sites || []).forEach(s => {
-                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
-                    const sig = `${s.id}_${baseAz}`;
-                    
-                    if (aptCustom.deleted && aptCustom.deleted.includes(sig)) return;
-                    
-                    const replacedByChange = aptCustom.added && aptCustom.added.some(add => 
-                        add.remark === 'Change Antenna' && add.id.replace('_CHG', '') === s.id && add.original_azimuth === baseAz
-                    );
-                    if (replacedByChange) return;
-                    
-                    let finalSite = { ...s, remark: s.remark || 'Existing' };
-                    if (aptCustom.modified && aptCustom.modified[sig]) {
-                        finalSite = { ...finalSite, ...aptCustom.modified[sig] };
-                    }
-                    sitesToExport.push(finalSite);
-                });
-                
-                if (aptCustom.added) {
-                    sitesToExport = sitesToExport.concat(aptCustom.added);
-                }
+        const formData = new FormData();
+        formData.append("file", file);
+        
+        fetch(`/api/import_csv/${encodeURIComponent(currentAirport)}`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === 'success') {
+                alert(data.message);
+                customSitesMap[currentAirport] = {
+                    added: data.added,
+                    modified: data.modified,
+                    deleted: []
+                };
+                localStorage.setItem('rsrp_custom_sites', JSON.stringify(customSitesMap));
+                localStorage.setItem('last_imported_airport', currentAirport);
+                window.location.reload();
             } else {
-                // Only edited sites: meaning added and modified
-                if (aptCustom.added) {
-                    sitesToExport = sitesToExport.concat(aptCustom.added);
-                }
-                
-                // For modified sites, we need to pull them from base and apply the mod
-                // Also include any unmodified system proposals (proposed_new, proposed_sector)
-                (aptData.sites || []).forEach(s => {
-                    const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
-                    const sig = `${s.id}_${baseAz}`;
-                    
-                    if (aptCustom.deleted && aptCustom.deleted.includes(sig)) return;
-                    
-                    if (aptCustom.modified && aptCustom.modified[sig]) {
-                        let finalSite = { ...s, remark: s.remark || 'Existing' };
-                        finalSite = { ...finalSite, ...aptCustom.modified[sig] };
-                        sitesToExport.push(finalSite);
-                    } else if (s.type && s.type !== 'existing') {
-                        // Unmodified system proposal
-                        sitesToExport.push(s);
-                    }
-                });
+                alert("Import error: " + JSON.stringify(data));
             }
-            
-            // Dedup sites
-            const uniqueSites = [];
-            const siteSigs = new Set();
-            sitesToExport.forEach(s => {
-                const sig = `${s.id}_${s.azimuth}`;
-                if (!siteSigs.has(sig)) {
-                    siteSigs.add(sig);
-                    uniqueSites.push(s);
-                }
-            });
-            sitesToExport = uniqueSites;
-
-            sitesToExport.forEach(site => {
-                let finalRadius = site.radius_m || site.clutter_radius || 600;
-                const row = [
-                    `"${aptName}"`,
-                    site.id,
-                    site.lat,
-                    site.lon,
-                    site.azimuth,
-                    finalRadius,
-                    site.beamwidth || 65,
-                    site.type,
-                    `"${site.remark || 'Existing'}"`,
-                    `"${getClutterName(finalRadius)}"`
-                ];
-                csvContent += row.join(",") + "\n";
-            });
-        }
+        })
+        .catch(err => {
+            alert("Failed to upload: " + err.message);
+        });
         
-        const encodedUri = encodeURI(csvContent);
-        const link = document.createElement("a");
-        link.setAttribute("href", encodedUri);
-        
-        const fileName = isAll ? "All_Sites_All_Airports.csv" : "Edited_Sites_All_Airports.csv";
-        link.setAttribute("download", fileName);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        document.getElementById('save-banner').style.display = 'none';
-        editedStateChanged = false;
+        e.target.value = ''; // Reset input
     });
 }
 
@@ -839,10 +826,27 @@ function renderMap(forceCenter = false) {
     mrLayerGroup.clearLayers();
     siteLayerGroup.clearLayers();
     sectorLayerGroup.clearLayers();
+    tlpLayerGroup.clearLayers();
 
     if (!currentAirport) return;
 
     const airport = DASHBOARD_DATA[currentAirport];
+    
+    // Render TLP Markers
+    if (airport.tlp_points && !hiddenSiteTypes.has('tlp')) {
+        airport.tlp_points.forEach(tlp => {
+            L.circleMarker([tlp.lat, tlp.lon], {
+                radius: 5,
+                fillColor: '#FFFFFF', // Solid White
+                color: '#000000',     // Black outline
+                weight: 1.5,
+                opacity: 1,
+                fillOpacity: 1.0,
+                pane: 'tlpPane'
+            }).bindTooltip(`<strong>TLP:</strong> ${tlp.name}`, {direction: 'top'})
+              .addTo(tlpLayerGroup);
+        });
+    }
     
     // Auto center
     if (forceCenter || !editedStateChanged) {
@@ -862,7 +866,7 @@ function renderMap(forceCenter = false) {
                 weight: 2,
                 fill: false
             },
-            pane: 'polyPane'
+            pane: 'airportPane'
         }).addTo(mrLayerGroup); // Attach to mrLayerGroup so it clears cleanly on renderMap
     }
 
@@ -920,13 +924,14 @@ function renderMap(forceCenter = false) {
         if (isHighGain) fillColor = '#FFA500'; // High Gain
         
         const polygonPoints = getSectorPolygon([site.lat, site.lon], radius, site.azimuth, beamwidth);
+        let targetPane = site.type === 'existing' ? 'existingPane' : 'proposalPane';
         const sector = L.polygon(polygonPoints, {
             color: colorLine,
             weight: weightLine,
             dashArray: isHighGain ? '5, 5' : null,
             fillColor: fillColor,
             fillOpacity: 1.0,
-            pane: 'sectorPane'
+            pane: targetPane
         }).addTo(sectorLayerGroup);
         
         let displayRemark = site.type === 'existing' ? 'Existing' : site.remark;
@@ -952,7 +957,8 @@ function renderMap(forceCenter = false) {
         });
 
         const isDraggable = (site.type !== 'existing');
-        const marker = L.marker([site.lat, site.lon], { icon: icon, draggable: isDraggable, pane: 'sitePane' }).addTo(siteLayerGroup);
+        let markerPane = site.type === 'existing' ? 'existingMarkerPane' : 'proposalMarkerPane';
+        const marker = L.marker([site.lat, site.lon], { icon: icon, draggable: isDraggable, pane: markerPane }).addTo(siteLayerGroup);
         
         let siteAzimuths = activeSites
             .filter(s => s.id === site.id)
@@ -1078,7 +1084,7 @@ function renderMap(forceCenter = false) {
                 weight: 1,
                 opacity: 0.8,
                 fillOpacity: 0.8,
-                pane: 'mrPane'
+                pane: 'gridPane'
             }).addTo(mrLayerGroup);
         });
 
@@ -1360,8 +1366,19 @@ map.on('contextmenu', (e) => {
         const lat = e.latlng.lat;
         const lon = e.latlng.lng;
         
+        const formattedAirportName = currentAirport.toUpperCase().replace(/\s+/g, '_');
+        let maxIdx = 0;
+        globalActiveSites.forEach(s => {
+            const match = s.id.match(new RegExp(`${formattedAirportName}_(\\d{3})`, 'i'));
+            if (match) {
+                const num = parseInt(match[1], 10);
+                if (num > maxIdx) maxIdx = num;
+            }
+        });
+        const nextIdx = (maxIdx + 1).toString().padStart(3, '0');
+        
         const newSite = {
-            id: 'MANUAL_ARPT_' + Math.floor(Math.random() * 10000),
+            id: `${formattedAirportName}_${nextIdx}`,
             lat: lat,
             lon: lon,
             azimuth: 0,

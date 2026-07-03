@@ -565,7 +565,39 @@ for apt in airports:
                                     uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.within(poly_calc)]
                                     placed = True
                             
-                            # Step A: Additional Sector (If MACRO/IBC2M)
+                            # Step A: Change Antenna (High Gain) (If MACRO/IBC2M)
+                            if not placed and site_type in ['MACRO', 'IBC2M'] and closest_dist <= 1300 and not closest_site_key.startswith('new_'):
+                                # Check if any existing sector points to the cluster
+                                for i_az, az in enumerate(list(s_info['azimuths'])):
+                                    diff = abs(bearing_to_cluster - az)
+                                    diff = min(diff, 360 - diff)
+                                    if diff <= 16.5: # 33 degree beamwidth
+                                        # It points to the cluster. Evaluate High Gain Antenna
+                                        new_radius = radius_m * 1.2
+                                        poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=new_radius, angle_deg=33)
+                                        # Does it actually cover any bad spots? Use centroid to prevent narrow beamwidth from clipping 50m buffer polygons
+                                        covered = uncovered_bad_spots[uncovered_bad_spots.geometry.centroid.within(poly_calc)]
+                                        if len(covered) > 0:
+                                            airport_proposals.append({
+                                                'Airport': airport_name,
+                                                'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
+                                                'Longitude': lon_s,
+                                                'Latitude': lat_s,
+                                                'Azimuth': az,
+                                                'Clutter': morpho,
+                                                'Radius': new_radius,
+                                                'Remark': 'Change Antenna',
+                                                'Tower Provider ID': 'N/A',
+                                                'Tower Provider Name': 'N/A'
+                                            })
+                                            poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=360, angle_deg=33)
+                                            global_change_antenna.append(poly_viz) 
+                                            global_calc_sectors.append(poly_calc)
+                                            uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.centroid.within(poly_calc)]
+                                            placed = True
+                                            break
+                            
+                            # Step B: Additional Sector (If MACRO/IBC2M and High Gain didn't happen)
                             if not placed and site_type in ['MACRO', 'IBC2M'] and closest_dist <= 1300:
                                 max_sec = 3 if 'new_' in closest_site_key else 4
                                 if len(s_info['azimuths']) < max_sec:
@@ -591,38 +623,6 @@ for apt in airports:
                                         global_calc_sectors.append(poly_calc)
                                         uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.centroid.within(poly_calc)]
                                         placed = True
-                                        
-                            # Step B: Change Antenna (If MACRO/IBC2M and Additional Sector didn't happen)
-                            if not placed and site_type in ['MACRO', 'IBC2M'] and closest_dist <= 1300 and not closest_site_key.startswith('new_'):
-                                # Check if any existing sector points to the cluster
-                                for i_az, az in enumerate(list(s_info['azimuths'])):
-                                    diff = abs(bearing_to_cluster - az)
-                                    diff = min(diff, 360 - diff)
-                                    if diff <= 16.5: # 33 degree beamwidth
-                                        # It points to the cluster. Evaluate High Gain Antenna
-                                        new_radius = max(radius_m * 1.2, closest_dist + 50)
-                                        poly_calc = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=new_radius, angle_deg=33)
-                                        # Does it actually cover any bad spots? Use centroid to prevent narrow beamwidth from clipping 50m buffer polygons
-                                        covered = uncovered_bad_spots[uncovered_bad_spots.geometry.centroid.within(poly_calc)]
-                                        if len(covered) > 0:
-                                            airport_proposals.append({
-                                                'Airport': airport_name,
-                                        'Site ID': s_info.get('site_id', 'EXISTING_SITE'),
-                                                'Longitude': lon_s,
-                                                'Latitude': lat_s,
-                                                'Azimuth': az,
-                                                'Clutter': morpho,
-                                                'Radius': new_radius,
-                                                'Remark': 'Change Antenna',
-                                                'Tower Provider ID': 'N/A',
-                                                'Tower Provider Name': 'N/A'
-                                            })
-                                            poly_viz = get_sector_polygon(s_info['x'], s_info['y'], s_info['lat'], az, radius_m=360, angle_deg=33)
-                                            global_change_antenna.append(poly_viz) 
-                                            global_calc_sectors.append(poly_calc)
-                                            uncovered_bad_spots = uncovered_bad_spots[~uncovered_bad_spots.geometry.centroid.within(poly_calc)]
-                                            placed = True
-                                            break
                                         
                         # Step 2: New Site
                         if not placed:
@@ -715,7 +715,7 @@ for apt in airports:
                                 azs = [snap_azimuth(base_az), snap_azimuth(base_az + 120), snap_azimuth(base_az + 240)]
                                 
                                 new_site_key = f"new_{iteration}"
-                                dummy_site_id = f"{name.upper().replace(' ', '_')}_ARPT_{new_site_count:03d}"
+                                dummy_site_id = f"{name.upper().replace(' ', '_')}_{new_site_count:03d}"
                                 new_site_count += 1
                                 current_sites_info[new_site_key] = {'x': ns_pt.x, 'y': ns_pt.y, 'lat': lat_ns, 'site_id': dummy_site_id, 'azimuths': azs, 'type': 'MACRO'}
                                 

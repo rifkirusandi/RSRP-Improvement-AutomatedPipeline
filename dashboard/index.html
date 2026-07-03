@@ -81,7 +81,9 @@
         <div style="margin-top: 15px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; display: flex; flex-direction: column; gap: 8px;">
             <label style="margin-bottom: 5px; font-weight: 500; font-size: 12px; color: #aaa;">Data Actions</label>
             <button id="btn-export-csv" style="width: 100%; background: #e67e22; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; transition: all 0.2s;">Export CSV</button>
-            <button id="btn-export-pptx" style="width: 100%; background: #9b59b6; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; transition: all 0.2s;">📊 Download PPTX</button>
+            <input type="file" id="csv-upload" accept=".csv" style="display: none;" />
+            <button id="btn-import-csv" style="width: 100%; background: #3498db; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; transition: all 0.2s;" onclick="document.getElementById('csv-upload').click()">Import CSV</button>
+            <button id="btn-export-pptx" style="width: 100%; background: #9b59b6; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; transition: all 0.2s;">📥 Download PPTX</button>
             <input type="file" id="pkl-upload" accept=".pkl" style="display: none;" />
             <button id="btn-load-pkl" style="width: 100%; background: #1abc9c; color: white; border: none; padding: 8px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 13px; transition: all 0.2s;" onclick="document.getElementById('pkl-upload').click()">📂 Load .pkl</button>
         </div>
@@ -183,6 +185,9 @@
         </div>
         <div class="legend-item toggleable active" data-sitetype="high_gain">
             <div class="color-box" style="background: #FFA500;"></div> High-Gain Upgrade
+        </div>
+        <div class="legend-item toggleable active" data-sitetype="tlp">
+            <div class="color-box" style="background: #FFFFFF; border: 1px solid #000000; border-radius: 50%;"></div> TLP Points
         </div>
         
         <!-- Quick Action inside legend panel -->

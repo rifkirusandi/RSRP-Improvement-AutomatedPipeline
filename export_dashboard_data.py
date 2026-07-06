@@ -3,21 +3,17 @@ import json
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Polygon
+from config import SITES_CSV, PROPOSALS_XLSX, PROPOSALS_PARQUET, MR_DIR, CLUTTER_PATH, AIRPORT_DIR, TLP_CSV, \
+    DASHBOARD_DATA_JS, DASHBOARD_DATA_PKL, OUT_DIR, SCRIPT_DIR
 
-SITES_CSV = r"Input_Data\sites_footprint.csv"
-MR_DIR = r"Input_Data\MR AIRPORT"
-PROPOSALS_XLSX = r"Output\All_Airports_Proposals.xlsx"
-PROPOSALS_PARQUET = r"Output\proposals_baseline.parquet"
 # Prefer Parquet for fast loading; fall back to Excel
 PROPOSALS_FILE = PROPOSALS_PARQUET if os.path.exists(PROPOSALS_PARQUET) else PROPOSALS_XLSX
-SHP_PATH = r"Input_Data\airport_border\airport_border.shp"
-OUT_JSON = r"dashboard\dashboard_data.js"
+SHP_PATH = os.path.join(AIRPORT_DIR, "airport_border.shp")
 
 os.makedirs("dashboard", exist_ok=True)
 
 from shapely.geometry import Point
 
-CLUTTER_PATH = r"Input_Data\Clutter\morphology.TAB"
 CLUTTER_RADII = {
     'DENSE URBAN': 636,
     'SUB URBAN': 1103,
@@ -99,7 +95,7 @@ else:
 
 # Load TLP Data
 print("Loading TLP Data...")
-df_tlp = pd.read_csv(r"Input_Data\TLP\tlp_nationwide.csv", encoding='ISO-8859-1', low_memory=False)
+df_tlp = pd.read_csv(TLP_CSV, encoding='ISO-8859-1', low_memory=False)
 df_tlp['Longitude'] = pd.to_numeric(df_tlp['Longitude'], errors='coerce')
 df_tlp['Latitude'] = pd.to_numeric(df_tlp['Latitude'], errors='coerce')
 df_tlp = df_tlp.dropna(subset=['Longitude', 'Latitude'])
@@ -257,9 +253,8 @@ for airport_name, data in airports.items():
     del data['polygon']
 
 # Compact JSON output (no whitespace)
-OUT_JSON = r"dashboard\dashboard_data.js"
-print(f"Exporting to {OUT_JSON}...")
-with open(OUT_JSON, 'w') as f:
+print(f"Exporting to {DASHBOARD_DATA_JS}...")
+with open(DASHBOARD_DATA_JS, 'w') as f:
     f.write("const DASHBOARD_DATA = ")
     json.dump(airports, f, separators=(',', ':'))
     f.write(";")
@@ -268,7 +263,7 @@ size_mb = os.path.getsize(OUT_JSON) / (1024*1024)
 print(f"Export complete! File size: {size_mb:.1f} MB")
 
 import pickle
-pkl_out = "airport_data.pkl"
+pkl_out = DASHBOARD_DATA_PKL
 print(f"Exporting to {pkl_out}...")
 with open(pkl_out, 'wb') as f:
     pickle.dump(airports, f)

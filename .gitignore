@@ -17,6 +17,12 @@ implementation_plan.md
 walkthrough.md
 build_deliverable.ps1
 
+# Local config (contains raw file names / local paths)
+config.py
+
+# Archives
+*.zip
+
 # GIS & Measurement Data (Heavy raw datasets)
 Input_Data/
 

@@ -62,11 +62,9 @@ def safe_add_basemap(ax, crs, source, attribution=False):
         # Fallback: just set a dark background so the plot still renders
         ax.set_facecolor('#2d2d2d')
 
-MR_DIR = r"Input_Data\MR AIRPORT"
-SITES_CSV = r"Input_Data\sites_footprint.csv"
-SHP_PATH = r"Input_Data\airport_border\airport_border.shp"
-PROPOSALS_XLSX = r"Output\All_Airports_Proposals.xlsx"
-OUT_DIR = "Output"
+from config import MR_DIR, SITES_CSV, AIRPORT_DIR, PROPOSALS_XLSX, OUT_DIR, EVIDENCE_DIR
+
+SHP_PATH = os.path.join(AIRPORT_DIR, "airport_border.shp")
 
 def get_sector_polygon(lon, lat, y_lat_for_scale, azimuth, radius_m=200, angle_deg=65):
     import pyproj
@@ -383,8 +381,8 @@ def main():
         gdf_sectors.plot(ax=ax_ev, facecolor='cyan', edgecolor='black', alpha=1.0, linewidth=0.5, zorder=10, label=f'Existing Sectors ({len(gdf_sectors)})')
         
     ax_ev.legend(loc='lower left', fontsize=10, framealpha=0.9)
-    evidence_path = os.path.join("Evidence", f"{target_airport}_Coverage_Evidence.png")
-    os.makedirs("Evidence", exist_ok=True)
+    evidence_path = os.path.join(EVIDENCE_DIR, f"{target_airport}_Coverage_Evidence.png")
+    os.makedirs(EVIDENCE_DIR, exist_ok=True)
     plt.savefig(evidence_path, bbox_inches='tight')
     plt.close(fig_ev)
 

@@ -16,11 +16,9 @@ import contextlib
 import re
 import uvicorn
 from csv_handler import export_airport_csv, import_airport_csv
+from config import PROPOSALS_XLSX, PROPOSALS_PARQUET, DASHBOARD_DATA_JS, AUTOSAVE_PKL, OUT_DIR, MR_DIR, GO_BINARY, SCRIPT_DIR
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROPOSALS_XLSX = os.path.join(SCRIPT_DIR, 'Output', 'All_Airports_Proposals.xlsx')
-PROPOSALS_PARQUET = os.path.join(SCRIPT_DIR, 'Output', 'proposals_baseline.parquet')
-DASHBOARD_DATA = os.path.join(SCRIPT_DIR, 'dashboard', 'dashboard_data.js')
+DASHBOARD_DATA = DASHBOARD_DATA_JS
 
 # Try Parquet first, fall back to Excel
 if os.path.exists(PROPOSALS_PARQUET):
@@ -144,8 +142,8 @@ async def autosave(request: Request):
         raise HTTPException(status_code=400, detail="No data provided")
         
     def save_pickle():
-        autosave_path = os.path.join(SCRIPT_DIR, 'Output', 'autosave.pkl')
-        os.makedirs(os.path.join(SCRIPT_DIR, 'Output'), exist_ok=True)
+        autosave_path = AUTOSAVE_PKL
+        os.makedirs(OUT_DIR, exist_ok=True)
         with open(autosave_path, 'wb') as f:
             pickle.dump(data, f)
             
@@ -319,7 +317,7 @@ def _legacy_process_backup(file_path, grid_size=0.00045, val_col='RSRP(All MRs) 
     return res
 
 def process_log_data(file_path, grid_size=0.00045, val_col='RSRP(All MRs) (dBm)'):
-    go_binary = os.path.join(SCRIPT_DIR, 'go_workers', 'mr_processor.exe')
+    go_binary = GO_BINARY
     try:
         res = subprocess.check_output(
             [go_binary, file_path, str(grid_size), val_col],

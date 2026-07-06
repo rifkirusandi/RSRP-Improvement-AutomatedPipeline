@@ -5,12 +5,7 @@ import geopandas as gpd
 from shapely.geometry import Point
 import numpy as np
 from fastapi.responses import Response
-
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATE_FILE = os.path.join(SCRIPT_DIR, 'Input_Data', 'EP-Template.xlsx')
-SITES_CSV = os.path.join(SCRIPT_DIR, 'Input_Data', 'sites_footprint.csv')
-PROPOSALS_XLSX = os.path.join(SCRIPT_DIR, 'Output', 'All_Airports_Proposals.xlsx')
-CLUTTER_PATH = os.path.join(SCRIPT_DIR, 'Input_Data', 'Clutter', 'morphology.TAB')
+from config import TEMPLATE_FILE, SITES_CSV, PROPOSALS_XLSX, CLUTTER_PATH, SCRIPT_DIR
 
 CLUTTER_RADII = {
     'DENSE URBAN': 636,

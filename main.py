@@ -30,23 +30,16 @@ try:
 except ImportError:
     HAS_FIONA = False
 
-# Constants
-MR_DIR = r"Input_Data\MR AIRPORT"
-SITES_CSV = r"Input_Data\sites_footprint.csv"
-SHP_PATH = r"Input_Data\airport_border\airport_border.shp"
-TERRITORY_PATH = r"Input_Data\Territory\territory.shp"
-CLUTTER_PATH = r"Input_Data\Clutter\morphology.TAB"
-RUNWAY_SHP = r"Input_Data\Runway\runway_buffer.shp"
-TLP_CSV = r"Input_Data\TLP\tlp_nationwide.csv"
-OUT_DIR = "Output"
-os.makedirs(OUT_DIR, exist_ok=True)
+from config import MR_DIR, SITES_CSV, AIRPORT_DIR, TERRITORY_DIR, CLUTTER_PATH, RUNWAY_DIR, TLP_CSV, \
+    OUT_DIR, EVIDENCE_DIR, PROPOSALS_XLSX, PROPOSALS_PARQUET, COVERAGE_STATS, CLUTTER_RADII
 
-CLUTTER_RADII = {
-    'DENSE URBAN': 636,
-    'SUB URBAN': 1103,
-    'URBAN': 975,
-    'RURAL': 1200
-}
+SHP_PATH = os.path.join(AIRPORT_DIR, "airport_border.shp")
+TERRITORY_PATH = os.path.join(TERRITORY_DIR, "territory.shp")
+RUNWAY_SHP = os.path.join(RUNWAY_DIR, "runway_buffer.shp")
+
+os.makedirs(OUT_DIR, exist_ok=True)
+os.makedirs(EVIDENCE_DIR, exist_ok=True)
+
 DEFAULT_RADIUS = 975
 
 def get_ordinal_suffix(day):
@@ -845,7 +838,7 @@ for apt in airports:
             
         ax_ev.legend(loc='lower left', fontsize=10, framealpha=0.9)
         os.makedirs("Evidence", exist_ok=True)
-        evidence_path = os.path.join("Evidence", f"{name}_Coverage_Evidence.png")
+        evidence_path = os.path.join(EVIDENCE_DIR, f"{name}_Coverage_Evidence.png")
         plt.savefig(evidence_path, bbox_inches='tight')
         plt.close(fig_ev)
         gc.collect()
@@ -1071,7 +1064,7 @@ for apt in airports:
     prs.save(out_pptx)
     print(f"Saved {out_pptx}")
     if len(global_all_proposals) > 0:
-        pd.DataFrame(global_all_proposals).to_excel(os.path.join(OUT_DIR, "All_Airports_Proposals.xlsx"), index=False)
+        pd.DataFrame(global_all_proposals).to_excel(PROPOSALS_XLSX, index=False)
     
     # --- ACCUMULATE EXCEL PROPOSALS ---
     if airport_proposals:
@@ -1080,7 +1073,7 @@ for apt in airports:
 # --- EXPORT COMBINED EXCEL REPORT ---
 if global_all_proposals:
     df_proposals = pd.DataFrame(global_all_proposals)
-    excel_path = os.path.join(OUT_DIR, "All_Airports_Proposals.xlsx")
+    excel_path = PROPOSALS_XLSX
     with pd.ExcelWriter(excel_path, engine='openpyxl') as writer:
         df_proposals.to_excel(writer, index=False, sheet_name='Proposals')
         worksheet = writer.sheets['Proposals']
@@ -1095,7 +1088,7 @@ if global_all_proposals:
     print(f"Saved Combined Excel report to {excel_path}")
     
     # Also save as Parquet for fast dashboard loading
-    parquet_path = os.path.join(OUT_DIR, "proposals_baseline.parquet")
+    parquet_path = PROPOSALS_PARQUET
     try:
         df_proposals.to_parquet(parquet_path, index=False)
         print(f"Saved Parquet baseline to {parquet_path}")
@@ -1106,7 +1099,7 @@ print("Pipeline completed successfully!")
 
 import json
 if 'ALL_COVERAGE_STATS' in globals():
-    stats_path = os.path.join(OUT_DIR, "Coverage_Stats.json")
+    stats_path = COVERAGE_STATS
     with open(stats_path, 'w') as f:
         json.dump(ALL_COVERAGE_STATS, f, indent=4)
     print(f"Saved Coverage Stats to {stats_path}")

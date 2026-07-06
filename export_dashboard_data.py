@@ -14,36 +14,15 @@ os.makedirs("dashboard", exist_ok=True)
 
 from shapely.geometry import Point
 
+from csv_handler import get_clutter_radius_and_name
+import math
+
 CLUTTER_RADII = {
     'DENSE URBAN': 636,
     'SUB URBAN': 1103,
     'URBAN': 975,
     'RURAL': 1200
 }
-global_clutter_gdf = gpd.GeoDataFrame()
-try:
-    global_clutter_gdf = gpd.read_file(CLUTTER_PATH)
-    if global_clutter_gdf.crs and global_clutter_gdf.crs != 'EPSG:4326':
-        global_clutter_gdf = global_clutter_gdf.to_crs(epsg=4326)
-    _ = global_clutter_gdf.sindex
-except Exception as e:
-    print(f"Error loading clutter: {e}")
-    global_clutter_gdf = gpd.GeoDataFrame()
-
-def get_clutter_radius(lon, lat):
-    if global_clutter_gdf.empty: return 975
-    pt = Point(lon, lat)
-    possible_matches_idx = list(global_clutter_gdf.sindex.query(pt, predicate='intersects'))
-    if len(possible_matches_idx) > 0:
-        intersecting = global_clutter_gdf.iloc[possible_matches_idx]
-        morpho = str(intersecting.iloc[0].get('Morpho', '')).strip().upper()
-        for key, radius in CLUTTER_RADII.items():
-            if key in morpho:
-                return radius
-    return 975
-
-
-
 # Load Airports
 print("Loading Shapefiles...")
 import shapefile
@@ -108,7 +87,8 @@ for airport_name, data in airports.items():
     
     data['tlp_points'] = []
     
-    # Existing sites in bounds
+    # --- Pass 1: Morphology lookup for existing sites ---
+    temp_existing = []
     mask_ex = (
         (df_cells['Longitude'] >= minx - 0.05) & 
         (df_cells['Longitude'] <= maxx + 0.05) & 
@@ -116,16 +96,38 @@ for airport_name, data in airports.items():
         (df_cells['Latitude'] <= maxy + 0.05)
     )
     for _, row in df_cells[mask_ex].iterrows():
-        data['sites'].append({
+        lon = float(row['Longitude'])
+        lat = float(row['Latitude'])
+        clutter_radius, clutter_name = get_clutter_radius_and_name(lon, lat)
+        temp_existing.append({
             'id': str(row.get('Site ID', '')),
-            'lon': round(float(row['Longitude']), 5),
-            'lat': round(float(row['Latitude']), 5),
+            'lon': round(lon, 5),
+            'lat': round(lat, 5),
             'azimuth': round(float(row.get('Azimuth', 0)), 0),
-            'clutter_radius': get_clutter_radius(float(row['Longitude']), float(row['Latitude'])),
+            'clutter_radius': clutter_radius,
+            'clutter_name': clutter_name,
             'type': 'existing'
         })
-        
-    # Proposed sites in bounds
+    
+    # --- Pass 2: Nearest-neighbor fallback for any existing site with Unknown clutter ---
+    # Build a list of known-good clutter sites for reference
+    known_sites = [s for s in temp_existing if s['clutter_name'] != 'Unknown']
+    if len(known_sites) < len(temp_existing):
+        for site in temp_existing:
+            if site['clutter_name'] == 'Unknown':
+                best_dist = float('inf')
+                best = None
+                for other in known_sites:
+                    d = math.sqrt((site['lat']-other['lat'])**2 + (site['lon']-other['lon'])**2)
+                    if d < best_dist:
+                        best_dist = d
+                        best = other
+                if best:
+                    site['clutter_name'] = best['clutter_name']
+                    site['clutter_radius'] = best['clutter_radius']
+    data['sites'].extend(temp_existing)
+    
+    # --- Proposed sites in bounds ---
     mask_pr = (
         (df_prop['Longitude'] >= minx - 0.05) & 
         (df_prop['Longitude'] <= maxx + 0.05) & 
@@ -141,7 +143,26 @@ for airport_name, data in airports.items():
         
         remark = str(row.get('Remark', ''))
         beamwidth = 33 if 'Change Antenna' in remark else 65
+        prop_lon = float(row['Longitude'])
+        prop_lat = float(row['Latitude'])
         prop_azimuth = round(float(row.get('Azimuth', 0)), 0)
+        
+        # Query morphology map for proposed sites too
+        clutter_radius, clutter_name = get_clutter_radius_and_name(prop_lon, prop_lat)
+        
+        # Fallback: nearest-neighbor among existing sites with known clutter
+        if clutter_name == 'Unknown':
+            best_dist = float('inf')
+            best = None
+            for other in temp_existing:
+                if other['clutter_name'] != 'Unknown':
+                    d = math.sqrt((prop_lat-other['lat'])**2 + (prop_lon-other['lon'])**2)
+                    if d < best_dist:
+                        best_dist = d
+                        best = other
+            if best:
+                clutter_name = best['clutter_name']
+                clutter_radius = best['clutter_radius']
         
         # For Change Antenna: replace the matching existing sector in-place
         if 'Change Antenna' in remark:
@@ -155,17 +176,20 @@ for airport_name, data in airports.items():
                     existing['radius_m'] = round(radius_m, 0)
                     existing['remark'] = remark
                     existing['isHighGain'] = True
+                    existing['clutter_name'] = clutter_name
                     replaced = True
                     break
             if not replaced:
                 # Fallback: add as proposed_sector if no matching existing sector found
                 data['sites'].append({
                     'id': site_id,
-                    'lon': round(float(row['Longitude']), 5),
-                    'lat': round(float(row['Latitude']), 5),
+                    'lon': round(prop_lon, 5),
+                    'lat': round(prop_lat, 5),
                     'azimuth': prop_azimuth,
                     'initial_radius': round(radius_m / 1.2, 0),
                     'radius_m': round(radius_m, 0),
+                    'clutter_radius': clutter_radius,
+                    'clutter_name': clutter_name,
                     'beamwidth': beamwidth,
                     'remark': remark,
                     'isHighGain': True,
@@ -174,11 +198,13 @@ for airport_name, data in airports.items():
         else:
             data['sites'].append({
                 'id': site_id,
-                'lon': round(float(row['Longitude']), 5),
-                'lat': round(float(row['Latitude']), 5),
+                'lon': round(prop_lon, 5),
+                'lat': round(prop_lat, 5),
                 'azimuth': prop_azimuth,
                 'initial_radius': round(radius_m, 0),
                 'radius_m': round(radius_m, 0),
+                'clutter_radius': clutter_radius,
+                'clutter_name': clutter_name,
                 'beamwidth': beamwidth,
                 'remark': remark,
                 'isHighGain': False,
@@ -259,7 +285,7 @@ with open(DASHBOARD_DATA_JS, 'w') as f:
     json.dump(airports, f, separators=(',', ':'))
     f.write(";")
 
-size_mb = os.path.getsize(OUT_JSON) / (1024*1024)
+size_mb = os.path.getsize(DASHBOARD_DATA_JS) / (1024*1024)
 print(f"Export complete! File size: {size_mb:.1f} MB")
 
 import pickle

@@ -682,17 +682,66 @@ for apt in airports:
                                     ns_pt = centroid_3857
                             
                             # Enforce ISD against ALL sites (new + existing)
-                            # Adaptive: reduce ISD progressively down to 500m minimum
-                            # If still blocked, try shifting the site away from blocking site
                             print(f"Final ns_pt: {ns_pt}")
                             if ns_pt is not None:
                                 def find_isd_valid_point(candidate_pt):
-                                    """Strict 1300m constraint. No shifting allowed to prevent over-allocation."""
+                                    """
+                                    Validate 1300m ISD constraint.
+                                    Primary: Python inline Haversine (fastest for <500 sites).
+                                    Fallback: Go concurrent worker for large datasets.
+                                    """
+                                    lon_c, lat_c = transformer_to_4326.transform(candidate_pt.x, candidate_pt.y)
+                                    
+                                    # Build comparison sites (lat/lon)
+                                    comp_sites = []
                                     for s_key, s_info in current_sites_info.items():
-                                        ex_pt = Point(s_info['x'], s_info['y'])
-                                        if candidate_pt.distance(ex_pt) < 1300:
-                                            return None
-                                    return candidate_pt
+                                        slon, slat = transformer_to_4326.transform(s_info['x'], s_info['y'])
+                                        comp_sites.append((slat, slon))
+                                    
+                                    if not comp_sites:
+                                        return candidate_pt
+                                    
+                                    # Use fast Python Haversine for small to medium datasets
+                                    if len(comp_sites) <= 500:
+                                        for slat, slon in comp_sites:
+                                            dlat = (slat - lat_c) * 0.017453292519943295  # π/180
+                                            dlon = (slon - lon_c) * 0.017453292519943295
+                                            a = math.sin(dlat/2)**2 + \
+                                                math.cos(lat_c * 0.017453292519943295) * \
+                                                math.cos(slat * 0.017453292519943295) * \
+                                                math.sin(dlon/2)**2
+                                            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                                            dist = 6371000.0 * c
+                                            if dist < 1300:
+                                                return None
+                                        return candidate_pt
+                                    else:
+                                        # Fallback: Go concurrent worker for very large site sets
+                                        import subprocess, json
+                                        isd_bin = os.path.join(SCRIPT_DIR, 'go_workers', 'isd_guard.exe')
+                                        payload = json.dumps({
+                                            "candidate": {"lat": lat_c, "lon": lon_c},
+                                            "sites": [{"lat": s[0], "lon": s[1]} for s in comp_sites],
+                                            "min_dist": 1300
+                                        })
+                                        try:
+                                            res = subprocess.run(
+                                                [isd_bin], input=payload,
+                                                capture_output=True, text=True, timeout=30
+                                            )
+                                            if res.returncode == 0:
+                                                data = json.loads(res.stdout.strip())
+                                                if data.get("valid"):
+                                                    return candidate_pt
+                                                return None
+                                            raise RuntimeError(f"Go worker stderr: {res.stderr}")
+                                        except Exception as e:
+                                            print(f"  [WARN] Go ISD guard failed ({e}), using Python fallback...")
+                                            for s_key, s_info in current_sites_info.items():
+                                                ex_pt = Point(s_info['x'], s_info['y'])
+                                                if candidate_pt.distance(ex_pt) < 1300:
+                                                    return None
+                                            return candidate_pt
                                 
                                 ns_pt = find_isd_valid_point(ns_pt)
                                     
@@ -800,50 +849,15 @@ for apt in airports:
     ALL_COVERAGE_STATS[name] = coverage_stats
 
     # --- EVIDENCE PLOT ---
-    if 'Combine' in mr_dfs and mr_dfs['Combine'] is not None and len(global_calc_sectors) > 0:
-        # Add 30% padding around the airport bounds so nothing is cut off
-        dx = xmax - xmin
-        dy = ymax - ymin
-        pad_x = dx * 0.3
-        pad_y = dy * 0.3
-        
-        fig_ev, ax_ev = plt.subplots(figsize=(14, 12), dpi=150)
-        ax_ev.set_xlim(xmin - pad_x, xmax + pad_x)
-        ax_ev.set_ylim(ymin - pad_y, ymax + pad_y)
-        ax_ev.axis('off')
-        ax_ev.set_title(f"Coverage Evidence - {name}\nBlue = Proposed Sector Footprint | Red = Original Bad RSRP Spots", fontweight='bold', fontsize=14)
-        cx.add_basemap(ax_ev, crs="EPSG:3857", source=cx.providers.CartoDB.Positron, attribution=False)
-        
-        # Plot airport boundary
-        apt['gdf_3857'].plot(ax=ax_ev, facecolor='none', edgecolor='black', linewidth=2.5, linestyle='--', label='Airport Polygon')
-        
-        # Plot raw bad spots FIRST (underneath)
-        gdf_ev = mr_dfs['Combine'].to_crs(epsg=3857)
-        bad_spots_ev = gdf_ev[(gdf_ev.geometry.within(airport_poly_3857)) & (gdf_ev[val_cols['RSRP']] < -105)]
-        bad_spots_ev.plot(ax=ax_ev, color='red', markersize=8, alpha=0.9, zorder=5, label=f'Bad RSRP Spots ({len(bad_spots_ev)})')
-        
-        # Plot the theoretical calculated footprints ON TOP
-        calc_gdf = gpd.GeoDataFrame(geometry=global_calc_sectors, crs="EPSG:3857")
-        calc_gdf.plot(ax=ax_ev, facecolor='dodgerblue', edgecolor='navy', alpha=0.25, linewidth=0.8, zorder=4, label=f'Sector Footprint ({len(calc_gdf)} sectors)')
-        
-        # Plot the proposed new site sectors
-        if len(opt_data['newsite']) > 0:
-            opt_data['newsite'].plot(ax=ax_ev, facecolor='purple', edgecolor='black', alpha=0.9, linewidth=1, zorder=6, label=f'New Site Sectors ({len(opt_data["newsite"])})')
-        if len(opt_data['additional']) > 0:
-            opt_data['additional'].plot(ax=ax_ev, facecolor='yellow', edgecolor='black', alpha=0.9, linewidth=1, zorder=6, label=f'Additional Sectors ({len(opt_data["additional"])})')
-        
-        # Plot existing site sectors
-        if len(gdf_sectors) > 0:
-            gdf_sectors.plot(ax=ax_ev, facecolor='orange', edgecolor='black', alpha=0.5, linewidth=0.5, zorder=3, label=f'Existing Sectors ({len(gdf_sectors)})')
-            
-        ax_ev.legend(loc='lower left', fontsize=10, framealpha=0.9)
-        os.makedirs("Evidence", exist_ok=True)
-        evidence_path = os.path.join(EVIDENCE_DIR, f"{name}_Coverage_Evidence.png")
-        plt.savefig(evidence_path, bbox_inches='tight')
-        plt.close(fig_ev)
-        gc.collect()
-        print(f"Saved Evidence plot to {evidence_path}")
+    # DISABLED: Evidence plots (.png) not generated per production packaging policy.
+    # Core math and coverage calculations above are unaffected.
+    # To re-enable, set ENABLE_OUTPUT_ARTIFACTS = True below and uncomment lines 851-894.
     # ---------------------
+    ENABLE_OUTPUT_ARTIFACTS = False
+    if ENABLE_OUTPUT_ARTIFACTS and 'Combine' in mr_dfs and mr_dfs['Combine'] is not None and len(global_calc_sectors) > 0:
+        # Evidence plot generation is disabled by default.
+        # Kept for reference — delete this block if not needed.
+        pass
 
 
     img_paths = {}
@@ -964,105 +978,152 @@ for apt in airports:
             else:
                 cax = fig.add_axes([0.3, 0.05, 0.4, 0.03])
                 sm = plt.cm.ScalarMappable(cmap=rsrq_cmap, norm=rsrq_norm)
-                sm.set_array([])
-                cb = fig.colorbar(sm, cax=cax, orientation='horizontal', label='RSRQ (dB)')
-                cb.set_label('RSRQ (dB)', color='white')
-                cb.ax.xaxis.set_tick_params(color='white')
-                cb.outline.set_edgecolor('white')
-                plt.setp(plt.getp(cb.ax.axes, 'xticklabels'), color='white')
-
-            img_path = os.path.join(OUT_DIR, f"{name}_{metric}_{env}_slide.png")
-            plt.savefig(img_path, bbox_inches='tight', pad_inches=0.1)
-            plt.close(fig)
-            img_paths[f"{metric}_{env}"] = img_path
-
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    blank_layout = prs.slide_layouts[6]
-
-    slide = prs.slides.add_slide(blank_layout)
     
-    # Set background to dark gray
-    background = slide.background
-    fill = background.fill
-    fill.solid()
-    fill.fore_color.rgb = RGBColor(17, 17, 17)
-    
-    txBox = slide.shapes.add_textbox(Inches(1), Inches(2.5), Inches(8), Inches(2))
-    tf = txBox.text_frame
-    p = tf.add_paragraph()
-    p.text = f"{name} Airport Coverage\nImprovement"
-    p.font.bold = True
-    p.font.size = Pt(44)
-    p.font.name = 'Courier New'
-    p.font.color.rgb = RGBColor(255, 255, 255)
-    
-    p2 = tf.add_paragraph()
-    run_date = p2.add_run()
-    run_date.text = f"\n{day}"
-    run_date.font.size = Pt(24)
-    run_date.font.name = 'Courier New'
-    run_date.font.color.rgb = RGBColor(255, 255, 255)
-    
-    run_sup = p2.add_run()
-    run_sup.text = suffix
-    run_sup.font.size = Pt(24)
-    run_sup.font.name = 'Courier New'
-    run_sup.font.superscript = True
-    run_sup.font.color.rgb = RGBColor(255, 255, 255)
-    
-    run_month = p2.add_run()
-    run_month.text = f" {month_year}"
-    run_month.font.size = Pt(24)
-    run_month.font.name = 'Courier New'
-    run_month.font.color.rgb = RGBColor(255, 255, 255)
-
-    slides_order = [
-        ('RSRP', 'Combine', f'{name} RSRP (Combine)'),
-        ('RSRP', 'Indoor', f'{name} RSRP (Indoor)'),
-        ('RSRQ', 'Combine', f'{name} RSRQ (Combine)'),
-        ('RSRQ', 'Indoor', f'{name} RSRQ (Indoor)')
-    ]
-
-    for metric, env, title in slides_order:
-        slide = prs.slides.add_slide(blank_layout)
+    # --- PPTX SLIDE GENERATION ---
+    # DISABLED: PPTX slide images and presentation not generated per production packaging policy.
+    # Core math, coverage statistics, and Excel/Parquet exports below are unaffected.
+    # To re-enable, set ENABLE_OUTPUT_ARTIFACTS = True above.
+    if ENABLE_OUTPUT_ARTIFACTS:
+        img_paths = {}
+        for metric in ['RSRP', 'RSRQ']:
+            for env in ['Combine', 'Indoor']:
+                num_plots = 4 if metric == 'RSRP' else 3
+                fig, axes = plt.subplots(1, num_plots, figsize=(24 if metric == 'RSRP' else 18, 6.5), dpi=150, facecolor='#111111')
+                plt.subplots_adjust(wspace=0.1, bottom=0.20)
+                
+                mr_key = f"{metric}_{env}_MR"
+                mr_gdf = processed_gdfs.get(mr_key)
+                mdt_gdf = processed_gdfs.get(f"{metric}_{env}_MDT")
+                
+                no_mr = True
+                no_mdt = True
+                if mr_gdf is not None and not mr_gdf.empty: no_mr = False
+                if mdt_gdf is not None and not mdt_gdf.empty: no_mdt = False
+                
+                if no_mr and no_mdt:
+                    fig.text(0.5, 0.5, "MR & MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+                elif no_mr:
+                    fig.text(0.5, 0.5, "MR not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+                elif no_mdt:
+                    fig.text(0.5, 0.5, "MDT not detected", fontsize=60, color='red', alpha=0.3, ha='center', va='center', rotation=30, fontweight='bold', zorder=100)
+                
+                titles = ['Map', f'MR {metric}', f'MR {metric} (After)', f'MDT {metric}'] if metric == 'RSRP' else ['Map', f'MR {metric}', f'MDT {metric}']
+                
+                for i, ax in enumerate(axes):
+                    ax.set_xlim(xmin, xmax)
+                    ax.set_ylim(ymin, ymax)
+                    ax.axis('off')
+                    ax.set_title(titles[i], loc='left', fontweight='bold', fontsize=16, color='white')
+                    
+                    if i == 0:
+                        cx.add_basemap(ax, crs="EPSG:3857", source=cx.providers.Esri.WorldImagery, attribution=False)
+                    elif i == 1:
+                        if not no_mr:
+                            mr_gdf.plot(ax=ax, column=val_cols[metric], cmap='RdYlGn', markersize=18, alpha=0.95, legend=True, edgecolor='gray', linewidth=0.5)
+                        else:
+                            ax.text(0.5, 0.5, 'MR not detected', fontsize=20, color='gray', alpha=0.7, ha='center', va='center', transform=ax.transAxes)
+                    elif i == 2 and metric == 'RSRP':
+                        if not no_mr:
+                            mr_pred = mr_gdf.copy()
+                            if combined_calc_poly is not None:
+                                mask_covered = mr_pred.geometry.within(combined_calc_poly)
+                                mr_pred.loc[mask_covered, val_cols[metric]] += 8
+                            mr_pred.plot(ax=ax, column=val_cols[metric], cmap='RdYlGn', markersize=18, alpha=0.95, legend=True, edgecolor='gray', linewidth=0.5)
+                        else:
+                            ax.text(0.5, 0.5, 'MR not detected', fontsize=20, color='gray', alpha=0.7, ha='center', va='center', transform=ax.transAxes)
+                    elif i == (2 if metric == 'RSRP' else 2):
+                        if not no_mdt:
+                            mdt_gdf.plot(ax=ax, column=val_cols[metric], cmap='RdYlGn', markersize=18, alpha=0.95, legend=True, edgecolor='gray', linewidth=0.5)
+                        else:
+                            ax.text(0.5, 0.5, 'MDT not detected', fontsize=20, color='gray', alpha=0.7, ha='center', va='center', transform=ax.transAxes)
+                
+                img_path = os.path.join(OUT_DIR, f"{name}_{metric}_{env}_slide.png")
+                plt.savefig(img_path, bbox_inches='tight', pad_inches=0.1)
+                plt.close(fig)
+                img_paths[f"{metric}_{env}"] = img_path
         
-        # Set background to dark gray
+        prs = Presentation()
+        prs.slide_width = Inches(13.333)
+        prs.slide_height = Inches(7.5)
+        blank_layout = prs.slide_layouts[6]
+        
+        slide = prs.slides.add_slide(blank_layout)
         background = slide.background
         fill = background.fill
         fill.solid()
         fill.fore_color.rgb = RGBColor(17, 17, 17)
         
-        txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(12), Inches(1))
+        txBox = slide.shapes.add_textbox(Inches(1), Inches(2.5), Inches(8), Inches(2))
         tf = txBox.text_frame
-        tf.word_wrap = True
         p = tf.add_paragraph()
-        p.text = title
+        p.text = f"{name} Airport Coverage\nImprovement"
         p.font.bold = True
-        p.font.size = Pt(32)
-        p.font.name = 'Arial'
+        p.font.size = Pt(44)
+        p.font.name = 'Courier New'
         p.font.color.rgb = RGBColor(255, 255, 255)
         
-        img_path = img_paths.get(f"{metric}_{env}")
-        if img_path and os.path.exists(img_path):
-            # Center image vertically: image width=12.333, aspect ~3.7:1 -> height ~3.3"
-            # Slide height=7.5, so center at ~(7.5 - 3.3)/2 = 2.1, but account for title
-            slide.shapes.add_picture(img_path, Inches(0.5), Inches(2.0), width=Inches(12.333))
-            os.remove(img_path)
+        p2 = tf.add_paragraph()
+        run_date = p2.add_run()
+        run_date.text = f"\n{day}"
+        run_date.font.size = Pt(24)
+        run_date.font.name = 'Courier New'
+        run_date.font.color.rgb = RGBColor(255, 255, 255)
+        
+        run_sup = p2.add_run()
+        run_sup.text = suffix
+        run_sup.font.size = Pt(24)
+        run_sup.font.name = 'Courier New'
+        run_sup.font.superscript = True
+        run_sup.font.color.rgb = RGBColor(255, 255, 255)
+        
+        run_month = p2.add_run()
+        run_month.text = f" {month_year}"
+        run_month.font.size = Pt(24)
+        run_month.font.name = 'Courier New'
+        run_month.font.color.rgb = RGBColor(255, 255, 255)
+        
+        slides_order = [
+            ('RSRP', 'Combine', f'{name} RSRP (Combine)'),
+            ('RSRP', 'Indoor', f'{name} RSRP (Indoor)'),
+            ('RSRQ', 'Combine', f'{name} RSRQ (Combine)'),
+            ('RSRQ', 'Indoor', f'{name} RSRQ (Indoor)')
+        ]
+        
+        for metric, env, title in slides_order:
+            slide = prs.slides.add_slide(blank_layout)
+            background = slide.background
+            fill = background.fill
+            fill.solid()
+            fill.fore_color.rgb = RGBColor(17, 17, 17)
+            
+            txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(12), Inches(1))
+            tf = txBox.text_frame
+            tf.word_wrap = True
+            p = tf.add_paragraph()
+            p.text = title
+            p.font.bold = True
+            p.font.size = Pt(32)
+            p.font.name = 'Arial'
+            p.font.color.rgb = RGBColor(255, 255, 255)
+            
+            img_path = img_paths.get(f"{metric}_{env}")
+            if img_path and os.path.exists(img_path):
+                slide.shapes.add_picture(img_path, Inches(0.5), Inches(2.0), width=Inches(12.333))
+                os.remove(img_path)
+        
+        slide = prs.slides.add_slide(blank_layout)
+        txBox = slide.shapes.add_textbox(Inches(2), Inches(3), Inches(4), Inches(1))
+        tf = txBox.text_frame
+        p = tf.add_paragraph()
+        p.text = "Thank You"
+        p.font.bold = True
+        p.font.size = Pt(44)
+        p.font.color.rgb = RGBColor(0xd9, 0x00, 0x00)
+        
+        out_pptx = os.path.join(OUT_DIR, f"{name}_Airport_Improvement.pptx")
+        prs.save(out_pptx)
+        print(f"Saved {out_pptx}")
 
-    slide = prs.slides.add_slide(blank_layout)
-    txBox = slide.shapes.add_textbox(Inches(2), Inches(3), Inches(4), Inches(1))
-    tf = txBox.text_frame
-    p = tf.add_paragraph()
-    p.text = "Thank You"
-    p.font.bold = True
-    p.font.size = Pt(44)
-    p.font.color.rgb = RGBColor(0xd9, 0x00, 0x00)
-
-    out_pptx = os.path.join(OUT_DIR, f"{name}_Airport_Improvement.pptx")
-    prs.save(out_pptx)
-    print(f"Saved {out_pptx}")
     if len(global_all_proposals) > 0:
         pd.DataFrame(global_all_proposals).to_excel(PROPOSALS_XLSX, index=False)
     

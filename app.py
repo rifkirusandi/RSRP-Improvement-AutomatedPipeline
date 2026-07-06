@@ -95,17 +95,28 @@ def save_edits_sync(data: SaveEditsRequest):
         else:
             df_outside = df
 
+    from csv_handler import get_clutter_radius_and_name
+
     new_rows = []
     for s in edited_sites:
         if s.type in ['proposed_new', 'proposed_sector', 'existing']:
+            # Query live morphology map for clutter classification
+            clutter_radius, clutter_name = get_clutter_radius_and_name(s.lon, s.lat)
+            # If morphology failed, fall back to the site's existing clutter_radius
+            if clutter_name == 'Unknown' and s.clutter_radius:
+                clutter_radius = s.clutter_radius
+            # Use latitude/longitude fallback for radius if still unknown
+            if clutter_name == 'Unknown':
+                clutter_radius = s.radius_m or 975
+
             new_rows.append({
                 'Airport': airport_name,
                 'Site ID': s.id,
                 'Longitude': s.lon,
                 'Latitude': s.lat,
                 'Azimuth': s.azimuth,
-                'Clutter': 'Unknown',
-                'Radius': s.radius_m,
+                'Clutter': clutter_name,
+                'Radius': s.radius_m or clutter_radius,
                 'Remark': s.remark,
                 'Tower Provider ID': s.tlp_id,
                 'Tower Provider Name': s.tlp_name
@@ -221,6 +232,17 @@ async def export_csv(airport_name: str):
         
     return export_airport_csv(airport_name, bbox)
 
+@app.get('/api/get_clutter')
+async def get_clutter(lat: float = 0, lon: float = 0):
+    """Query morphology map for clutter classification at given coordinates."""
+    try:
+        from csv_handler import get_clutter_radius_and_name
+        radius, name = get_clutter_radius_and_name(lon, lat)
+        return JSONResponse({"clutter_name": name, "clutter_radius": radius})
+    except Exception as e:
+        print(f"Clutter query failed: {e}")
+        return JSONResponse({"clutter_name": "Unknown", "clutter_radius": 975})
+
 @app.post('/api/import_csv/{airport_name}')
 async def import_csv(airport_name: str, file: UploadFile = File(...)):
     if not file.filename.endswith('.csv'):
@@ -239,10 +261,12 @@ async def import_csv(airport_name: str, file: UploadFile = File(...)):
         if airport_name not in custom_sites:
             custom_sites[airport_name] = {'added': [], 'deleted': [], 'modified': {}}
             
-        # Overwrite exactly as requested
+        # Overwrite exactly as requested - purge ALL previous proposals for this airport
         custom_sites[airport_name]['added'] = added
         custom_sites[airport_name]['modified'] = modified
-        custom_sites[airport_name]['deleted'] = []
+        # '__ALL__' sentinel tells the frontend to hide ALL base proposals for this airport,
+        # since the uploaded CSV is the complete replacement dataset
+        custom_sites[airport_name]['deleted'] = ['__ALL__']
         
         # Save back to autosave.pkl
         with open(autosave_path, 'wb') as f:

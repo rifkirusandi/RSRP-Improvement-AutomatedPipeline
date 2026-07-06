@@ -63,7 +63,44 @@ function initMap() {
     
     document.getElementById('loading-screen').style.display = 'none';
     
-    // Right click is handled globally at the end of the file now
+    // Attach right-click context menu handler
+    map.on('contextmenu', (e) => {
+        if (!multiSelectMode) {
+            // Original manual add new site logic
+            if (!currentAirport) return;
+            const lat = e.latlng.lat;
+            const lon = e.latlng.lng;
+            
+            const formattedAirportName = currentAirport.toUpperCase().replace(/\s+/g, '_');
+            let maxIdx = 0;
+            globalActiveSites.forEach(s => {
+                const match = s.id.match(new RegExp(`${formattedAirportName}_(\\d{3})`, 'i'));
+                if (match) {
+                    const num = parseInt(match[1], 10);
+                    if (num > maxIdx) maxIdx = num;
+                }
+            });
+            const nextIdx = (maxIdx + 1).toString().padStart(3, '0');
+            
+            const newSite = {
+                id: `${formattedAirportName}_${nextIdx}`,
+                lat: lat,
+                lon: lon,
+                azimuth: 0,
+                radius_m: 600,
+                beamwidth: 65,
+                remark: 'New Site',
+                type: 'proposed_new',
+                tlp_id: 'N/A',
+                tlp_name: 'N/A'
+            };
+            
+            customSites.added.push(newSite);
+            markEdited();
+            renderMap();
+            openEditor(newSite);
+        }
+    });
 }
 
 function markEdited() {
@@ -474,7 +511,7 @@ function setupEditorListeners() {
         pendingNewSiteLatLng = null;
     });
 
-    document.getElementById('btn-confirm-new-site').addEventListener('click', () => {
+    document.getElementById('btn-confirm-new-site').addEventListener('click', async () => {
         const numSectorsStr = document.getElementById('new-site-sectors').value;
         const azimuthsStr = document.getElementById('new-site-azimuths').value;
         const errDiv = document.getElementById('new-site-error');
@@ -493,27 +530,69 @@ function setupEditorListeners() {
             return;
         }
         
-        // Generate site ID: e.g. KOMODO_842
         const prefix = currentAirport ? currentAirport.toUpperCase().replace(/\s+/g, '_') : 'SITE';
-        const siteId = prefix + '_' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-        
         const lat = pendingNewSiteLatLng.lat;
         const lon = pendingNewSiteLatLng.lng;
         
-        let nearestDist = Infinity;
-        let inferredClutterRadius = 600;
-        
+        // --- FIX 1: Compute sequential Site ID by scanning max _ARPT_ index ---
+        let maxIdx = 0;
         const aptData = DASHBOARD_DATA[currentAirport];
+        
+        // Scan system-generated proposed_new sites with our prefix pattern
         if (aptData && aptData.sites) {
             aptData.sites.forEach(s => {
-                if (s.type === 'existing') {
-                    let d = getDistance(lat, lon, s.lat, s.lon);
-                    if (d < nearestDist) {
-                        nearestDist = d;
-                        inferredClutterRadius = s.clutter_radius || 600;
+                if (s.type === 'proposed_new' && s.id.startsWith(prefix)) {
+                    const parts = s.id.split('_');
+                    const numPart = parseInt(parts[parts.length - 1]);
+                    if (!isNaN(numPart) && numPart > maxIdx) {
+                        maxIdx = numPart;
                     }
                 }
             });
+        }
+        // Also scan user-added sites for this airport to continue from their max
+        (customSites.added || []).forEach(s => {
+            if (s.type === 'proposed_new' && s.id.startsWith(prefix)) {
+                const parts = s.id.split('_');
+                const numPart = parseInt(parts[parts.length - 1]);
+                if (!isNaN(numPart) && numPart > maxIdx) {
+                    maxIdx = numPart;
+                }
+            }
+        });
+        
+        const nextNumber = (maxIdx + 1).toString().padStart(3, '0');
+        const siteId = prefix + '_ARPT_' + nextNumber;
+        
+        // --- FIX 2: Query morphology map for accurate clutter ---
+        let clutterRadius = 975;    // default URBAN
+        let clutterName = 'Unknown';
+        let nearestDist = Infinity;
+        
+        try {
+            const resp = await fetch('/api/get_clutter?lat=' + lat + '&lon=' + lon);
+            const data = await resp.json();
+            if (data.clutter_name !== 'Unknown') {
+                clutterName = data.clutter_name;
+                clutterRadius = data.clutter_radius;
+            } else {
+                throw new Error('No morphology match');
+            }
+        } catch (e) {
+            // --- Fallback: Nearest-Neighbor from existing sites in this airport ---
+            console.log('Morphology query failed, using nearest-neighbor fallback:', e);
+            if (aptData && aptData.sites) {
+                aptData.sites.forEach(s => {
+                    if (s.type === 'existing') {
+                        let d = getDistance(lat, lon, s.lat, s.lon);
+                        if (d < nearestDist) {
+                            nearestDist = d;
+                            clutterRadius = s.clutter_radius || 975;
+                            clutterName = 'Nearest Neighbor';
+                        }
+                    }
+                });
+            }
         }
         
         for(let i = 0; i < numSectors; i++) {
@@ -523,8 +602,9 @@ function setupEditorListeners() {
                 lon: lon,
                 azimuth: azimuths[i],
                 original_azimuth: azimuths[i],
-                radius_m: inferredClutterRadius,
-                clutter_radius: inferredClutterRadius,
+                radius_m: clutterRadius,
+                clutter_radius: clutterRadius,
+                clutter_name: clutterName,
                 beamwidth: 65,
                 remark: 'New Site',
                 type: 'proposed_new',
@@ -577,8 +657,11 @@ function setupEditorListeners() {
                 const sig = `${s.id}_${baseAz}`;
                 const isModified = customSites.modified && customSites.modified[sig] !== undefined;
                 
+                // Skip if __ALL__ sentinel is set (CSV import overwrite) — only proposals, never existing sites
+                if (customSites.deleted && customSites.deleted.includes('__ALL__') && s.type !== 'existing') return;
+                
                 if (s.type !== 'existing' || s.remark === 'Change Antenna' || isModified) {
-                    // Skip if deleted
+                    // Skip if individually deleted
                     if (customSites.deleted && customSites.deleted.includes(sig)) return;
                     
                     // Apply modifications if any
@@ -736,6 +819,9 @@ function setupEditorListeners() {
                 const sig = `${s.id}_${baseAz}`;
                 const isModified = customSites.modified && customSites.modified[sig] !== undefined;
                 
+                // Skip if __ALL__ sentinel is set (CSV import overwrite) — only proposals, never existing sites
+                if (customSites.deleted && customSites.deleted.includes('__ALL__') && s.type !== 'existing') return;
+                
                 if (s.type !== 'existing' || s.remark === 'Change Antenna' || isModified) {
                     if (customSites.deleted && customSites.deleted.includes(sig)) return;
                     let finalSite = { ...s };
@@ -808,7 +894,7 @@ function setupEditorListeners() {
                 customSitesMap[currentAirport] = {
                     added: data.added,
                     modified: data.modified,
-                    deleted: []
+                    deleted: ['__ALL__']
                 };
                 localStorage.setItem('rsrp_custom_sites', JSON.stringify(customSitesMap));
                 localStorage.setItem('last_imported_airport', currentAirport);
@@ -881,7 +967,10 @@ function renderMap(forceCenter = false) {
         const baseAz = s.original_azimuth !== undefined ? s.original_azimuth : s.azimuth;
         const sig = `${s.id}_${baseAz}`;
         
-        // Skip if deleted
+        // Skip if __ALL__ sentinel is set (CSV import overwrite) — only proposals, never existing sites
+        if (customSites.deleted && customSites.deleted.includes('__ALL__') && s.type !== 'existing') return;
+        
+        // Skip if individually deleted
         if (customSites.deleted && customSites.deleted.includes(sig)) return;
         
         // Skip if replaced by 'Change Antenna' in customSites.added
@@ -1364,43 +1453,7 @@ function cancelMultiSelectMode() {
 // We can modify the marker.on('click') in renderMap or add a map click that finds the closest site.
 // A better way is to override marker clicks when in multiSelectMode. Let's do that in renderMap.
 
-map.on('contextmenu', (e) => {
-    if (!multiSelectMode) {
-        // Original manual add new site logic
-        if (!currentAirport) return;
-        const lat = e.latlng.lat;
-        const lon = e.latlng.lng;
-        
-        const formattedAirportName = currentAirport.toUpperCase().replace(/\s+/g, '_');
-        let maxIdx = 0;
-        globalActiveSites.forEach(s => {
-            const match = s.id.match(new RegExp(`${formattedAirportName}_(\\d{3})`, 'i'));
-            if (match) {
-                const num = parseInt(match[1], 10);
-                if (num > maxIdx) maxIdx = num;
-            }
-        });
-        const nextIdx = (maxIdx + 1).toString().padStart(3, '0');
-        
-        const newSite = {
-            id: `${formattedAirportName}_${nextIdx}`,
-            lat: lat,
-            lon: lon,
-            azimuth: 0,
-            radius_m: 600,
-            beamwidth: 65,
-            remark: 'New Site',
-            type: 'proposed_new',
-            tlp_id: 'N/A',
-            tlp_name: 'N/A'
-        };
-        
-        customSites.added.push(newSite);
-        markEdited();
-        renderMap();
-        openEditor(newSite);
-    }
-});
+// (Moved to initMap)
 
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && multiSelectMode) {

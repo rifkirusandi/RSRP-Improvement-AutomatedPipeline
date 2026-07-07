@@ -1,4 +1,9 @@
-import os
+import sys, os
+# Add project root to sys.path so imports like 'from config import *' still work
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 import io
 import pandas as pd
 import geopandas as gpd
@@ -59,7 +64,7 @@ def export_airport_csv(airport_name: str, bbox: tuple):
     if os.path.exists(PROPOSALS_XLSX):
         df_pr = pd.read_excel(PROPOSALS_XLSX)
     else:
-        df_pr = pd.read_parquet(os.path.join(SCRIPT_DIR, 'Output', 'proposals_baseline.parquet'))
+        df_pr = pd.read_parquet(os.path.join(SCRIPT_DIR, 'data', 'output', 'proposals_baseline.parquet'))
         
     df_pr = df_pr[df_pr['Airport'].astype(str).str.lower() == airport_name.lower()].copy()
     

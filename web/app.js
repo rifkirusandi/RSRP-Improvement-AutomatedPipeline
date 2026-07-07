@@ -63,44 +63,7 @@ function initMap() {
     
     document.getElementById('loading-screen').style.display = 'none';
     
-    // Attach right-click context menu handler
-    map.on('contextmenu', (e) => {
-        if (!multiSelectMode) {
-            // Original manual add new site logic
-            if (!currentAirport) return;
-            const lat = e.latlng.lat;
-            const lon = e.latlng.lng;
-            
-            const formattedAirportName = currentAirport.toUpperCase().replace(/\s+/g, '_');
-            let maxIdx = 0;
-            globalActiveSites.forEach(s => {
-                const match = s.id.match(new RegExp(`${formattedAirportName}_(\\d{3})`, 'i'));
-                if (match) {
-                    const num = parseInt(match[1], 10);
-                    if (num > maxIdx) maxIdx = num;
-                }
-            });
-            const nextIdx = (maxIdx + 1).toString().padStart(3, '0');
-            
-            const newSite = {
-                id: `${formattedAirportName}_${nextIdx}`,
-                lat: lat,
-                lon: lon,
-                azimuth: 0,
-                radius_m: 600,
-                beamwidth: 65,
-                remark: 'New Site',
-                type: 'proposed_new',
-                tlp_id: 'N/A',
-                tlp_name: 'N/A'
-            };
-            
-            customSites.added.push(newSite);
-            markEdited();
-            renderMap();
-            openEditor(newSite);
-        }
-    });
+    // No right-click context menu handler - removed per user request
 }
 
 function markEdited() {
@@ -240,15 +203,15 @@ function openEditor(site, isMarkerClick = false) {
     }
     let isChangeAntenna = site.remark === 'Change Antenna';
     
-    if (site.type === 'existing' && !isChangeAntenna) {
-        document.getElementById('btn-delete-site').style.display = 'none'; // Cant delete existing
+    if (site.type === 'existing') {
+        document.getElementById('btn-delete-site').style.display = 'none'; // Cant delete existing (original or high gain)
         document.getElementById('azimuth-slider').disabled = true; // Cant rotate existing here
-        document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
+        document.getElementById('existing-site-actions').style.display = 'flex'; // Show Revert/Add buttons
         document.getElementById('btn-add-sector').style.display = 'block'; // Only for existing
     } else {
         document.getElementById('btn-delete-site').style.display = 'block';
         document.getElementById('btn-delete-site').innerText = isMarkerClick ? "Delete Entire Site" : "Delete Sector";
-        document.getElementById('azimuth-slider').disabled = isMarkerClick || isChangeAntenna || (site.type === 'existing'); // Cant rotate marker or existing high gain
+        document.getElementById('azimuth-slider').disabled = isMarkerClick || (site.type === 'existing');
         document.getElementById('existing-site-actions').style.display = 'flex'; // Show Change/Add buttons
         document.getElementById('btn-add-sector').style.display = 'none'; // Hide for new sites
     }
@@ -456,8 +419,7 @@ function setupEditorListeners() {
             customSites.modified[sig].remark = 'Change Antenna';
             customSites.modified[sig].radius_m = initialRadius * 1.2;
             customSites.modified[sig].beamwidth = 33;
-            // Force type visualization
-            customSites.modified[sig].type = 'proposed_sector';
+            // Leave type as-is (existing type stays 'existing')
         }
         
         markEdited();

@@ -166,9 +166,16 @@ go build -o go_workers/mr_processor.exe go_workers/mr_processor.go
 ```
 
 ### Generate Proposal Baseline
+### Run Full Pipeline (requires full GIS deps)
 ```bash
-python main.py
-python export_dashboard_data.py
+python -m src.pipeline.main
+python -m src.data.export_dashboard
+```
+
+### Or use the Dashboard API
+```bash
+# Start the server
+python -m src.server.app
 ```
 
 Or click **"Run Full Pipeline"** in the dashboard.
@@ -177,42 +184,63 @@ Or click **"Run Full Pipeline"** in the dashboard.
 
 ## 📦 Deliverable Package Structure
 
+The project has been restructured into a clean, professional layout:
+
 ```
-RSRP_Dashboard_Deliverable.zip
-├── app.py                      # FastAPI web server
-├── main.py                     # Spatial optimization engine
-├── export_dashboard_data.py    # Dashboard data exporter
-├── csv_handler.py              # CSV import/export + clutter query
-├── generate_single_pptx.py     # PPTX report generator (optional)
-├── config.py                   # Local path configuration (gitignored)
-├── config.example.py           # Public path template
-├── schemas.py                  # Pydantic V2 models
-├── requirements.txt            # Full dependencies
-├── requirements-lite.txt       # Lite dependencies
-├── README.md                   # This file
-├── dashboard/                  # Frontend assets
+RSRP-Improvement-AutomatedPipeline/
+├── config.py                     # Local machine paths (gitignored)
+├── pyproject.toml                # Project metadata
+├── README.md
+├── requirements.txt
+├── requirements-lite.txt
+│
+├── src/                          # Python source code
+│   ├── pipeline/
+│   │   └── main.py              # Pipeline orchestration
+│   ├── server/
+│   │   └── app.py               # FastAPI dashboard server
+│   ├── data/
+│   │   ├── csv_handler.py       # CSV import/export
+│   │   └── export_dashboard.py  # Dashboard data builder
+│   └── utils/
+│       └── pptx_generator.py    # PPTX evidence generator
+│
+├── web/                          # Frontend assets
 │   ├── index.html
 │   ├── app.js
-│   ├── dashboard_data.js       # Generated site data (~7MB)
-│   ├── airport_data.pkl        # Cached airport geometries
-│   └── ... (CSS, assets)
-├── go_workers/
-│   ├── isd_guard.go            # Go ISD guard source
-│   ├── isd_guard.exe           # Compiled ISD binary
-│   ├── mr_processor.go         # Go MR processor source
-│   └── mr_processor.exe        # Compiled MR binary
-├── Input_Data/                 # GIS inputs (user-provided)
-│   ├── airport_border/
-│   ├── Clutter/morphology.TAB
-│   ├── Runway/
-│   ├── Territory/
-│   ├── TLP/
-│   └── MR AIRPORT/
-└── Output/                     # Pipeline output (auto-generated)
-    ├── proposals_baseline.parquet
-    ├── All_Airports_Proposals.xlsx
-    ├── Coverage_Stats.json
-    └── autosave.pkl
+│   ├── styles.css
+│   ├── dashboard_data.js
+│   ├── leaflet.css
+│   └── leaflet.js
+│
+├── data/
+│   ├── input/                   # GIS inputs (user-provided)
+│   │   ├── Clutter/
+│   │   ├── Runway/
+│   │   ├── Territory/
+│   │   ├── TLP/
+│   │   ├── MR AIRPORT/
+│   │   └── airport_border/
+│   └── output/                  # Pipeline output (auto-generated)
+│       ├── proposals_baseline.parquet
+│       ├── All_Airports_Proposals.xlsx
+│       ├── Coverage_Stats.json
+│       └── evidence/
+│
+├── workers/                     # Compiled worker binaries
+│   ├── mr_processor.go
+│   ├── isd_guard.go
+│   └── *.exe
+│
+├── conf/
+│   ├── schemas.py               # Pydantic data models
+│   └── config.example.py        # Configuration template
+│
+├── scripts/
+│   └── build_deliverable.ps1
+│
+└── tests/
+    └── test_api.py
 ```
 
 **Excluded from package:**

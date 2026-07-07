@@ -24,11 +24,10 @@ config.py
 *.zip
 
 # GIS & Measurement Data (Heavy raw datasets)
-Input_Data/
+data/input/
 
 # Output reports & Evidence
-Output/
-Evidence/
+data/output/
 *.pkl
 *.xlsx
 *.parquet

@@ -1,4 +1,9 @@
-import os
+import sys, os
+# Add project root to sys.path so imports like 'from config import *' still work
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 import math
 import numpy as np
 import pandas as pd
@@ -718,7 +723,7 @@ for apt in airports:
                                     else:
                                         # Fallback: Go concurrent worker for very large site sets
                                         import subprocess, json
-                                        isd_bin = os.path.join(SCRIPT_DIR, 'go_workers', 'isd_guard.exe')
+                                        isd_bin = os.path.join(SCRIPT_DIR, 'workers', 'isd_guard.exe')
                                         payload = json.dumps({
                                             "candidate": {"lat": lat_c, "lon": lon_c},
                                             "sites": [{"lat": s[0], "lon": s[1]} for s in comp_sites],
@@ -744,17 +749,54 @@ for apt in airports:
                                             return candidate_pt
                                 
                                 ns_pt = find_isd_valid_point(ns_pt)
+                                if ns_pt is None:
+                                    ns_pt = centroid_3857
                                     
                             print(f"Final ns_pt: {ns_pt}")
                             if ns_pt is not None:
                                 lon_ns, lat_ns = transformer_to_4326.transform(ns_pt.x, ns_pt.y)
                                 
-                                if ns_pt.distance(centroid_3857) > 1:
-                                    base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
-                                else:
-                                    base_az = 0
+                                # Dynamic 10-degree sweep algorithm for New Sites
+                                remaining_sweep = bad_spots_3857.copy()
+                                azs = []
+                                for _ in range(3):
+                                    best_az = -1
+                                    max_covered = 0
+                                    best_remaining = None
                                     
-                                azs = [snap_azimuth(base_az), snap_azimuth(base_az + 120), snap_azimuth(base_az + 240)]
+                                    for test_az in range(0, 360, 10):
+                                        # Enforce 90-degree minimum gap constraint
+                                        valid = True
+                                        for existing_az in azs:
+                                            diff = abs(test_az - existing_az)
+                                            diff = min(diff, 360 - diff)
+                                            if diff < 90:
+                                                valid = False
+                                                break
+                                        if not valid: continue
+                                        
+                                        poly = get_sector_polygon(ns_pt.x, ns_pt.y, lat_ns, test_az, radius_m=radius_m, angle_deg=65)
+                                        covered_mask = remaining_sweep.geometry.within(poly)
+                                        covered = covered_mask.sum()
+                                        
+                                        if covered > max_covered:
+                                            max_covered = covered
+                                            best_az = test_az
+                                            best_remaining = remaining_sweep[~covered_mask]
+                                            
+                                    if max_covered > 0:
+                                        azs.append(float(best_az))
+                                        remaining_sweep = best_remaining
+                                    else:
+                                        break
+                                
+                                # Failsafe if spots were out of radius entirely
+                                if not azs:
+                                    if ns_pt.distance(centroid_3857) > 1:
+                                        base_az = calculate_bearing(lon_ns, lat_ns, lon_c, lat_c)
+                                    else:
+                                        base_az = 0
+                                    azs = [float(snap_azimuth(base_az))]
                                 
                                 new_site_key = f"new_{iteration}"
                                 dummy_site_id = f"{name.upper().replace(' ', '_')}_{new_site_count:03d}"

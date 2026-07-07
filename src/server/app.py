@@ -1,21 +1,25 @@
-import os
-import sys
-import subprocess
-import pandas as pd
+import sys, os
+# Add project root to sys.path so imports like 'from config import *' still work
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 import json
-import pickle
-import asyncio
-from fastapi import FastAPI, Request, HTTPException, UploadFile, File
-from fastapi.responses import JSONResponse, FileResponse
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
-import threading
-import webbrowser
-from schemas import SaveEditsRequest, ProcessLogRequest
-import contextlib
 import re
+import threading
+import contextlib
+import pickle
+import subprocess
+import asyncio
+import pandas as pd
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File
+from starlette.responses import FileResponse, JSONResponse
+from starlette.staticfiles import StaticFiles
+from pydantic import BaseModel, ValidationError
+import webbrowser
+from conf.schemas import SaveEditsRequest, ProcessLogRequest
 import uvicorn
-from csv_handler import export_airport_csv, import_airport_csv
+from src.data.csv_handler import export_airport_csv, import_airport_csv
 from config import PROPOSALS_XLSX, PROPOSALS_PARQUET, DASHBOARD_DATA_JS, AUTOSAVE_PKL, OUT_DIR, MR_DIR, GO_BINARY, SCRIPT_DIR
 
 DASHBOARD_DATA = DASHBOARD_DATA_JS
@@ -205,7 +209,7 @@ async def download_pptx(airport_name: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start PPTX generator: {str(e)}")
         
-    file_path = os.path.join(SCRIPT_DIR, 'Output', f"{airport_name}_Airport_Improvement.pptx")
+    file_path = os.path.join(SCRIPT_DIR, 'data', 'output', f"{airport_name}_Airport_Improvement.pptx")
     if res.returncode != 0 or not os.path.exists(file_path):
         error_msg = res.stderr.strip() if res.stderr else ""
         stdout_msg = res.stdout.strip() if res.stdout else ""
@@ -252,7 +256,7 @@ async def import_csv(airport_name: str, file: UploadFile = File(...)):
         added, modified = import_airport_csv(airport_name, content)
         
         # Load current autosave state to merge
-        autosave_path = os.path.join(SCRIPT_DIR, 'Output', 'autosave.pkl')
+        autosave_path = os.path.join(SCRIPT_DIR, 'data', 'output', 'autosave.pkl')
         custom_sites = {}
         if os.path.exists(autosave_path):
             with open(autosave_path, 'rb') as f:
@@ -364,7 +368,7 @@ async def handle_process_log(data: ProcessLogRequest):
     return JSONResponse({"status": "success", "data_length": len(result)})
 
 # Mount static files at root level so index.html and its relative assets resolve cleanly
-app.mount("/", StaticFiles(directory=os.path.join(SCRIPT_DIR, 'dashboard'), html=True), name="dashboard")
+app.mount("/", StaticFiles(directory=os.path.join(SCRIPT_DIR, 'web'), html=True), name="web")
 
 if __name__ == '__main__':
     import uvicorn

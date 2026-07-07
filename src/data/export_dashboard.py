@@ -1,10 +1,16 @@
-import os
+import sys, os
+# Add project root to sys.path so imports like 'from config import *' still work
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
 import json
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Polygon
 from config import SITES_CSV, PROPOSALS_XLSX, PROPOSALS_PARQUET, MR_DIR, CLUTTER_PATH, AIRPORT_DIR, TLP_CSV, \
     DASHBOARD_DATA_JS, DASHBOARD_DATA_PKL, OUT_DIR, SCRIPT_DIR
+from src.data.csv_handler import get_clutter_radius_and_name
 
 # Prefer Parquet for fast loading; fall back to Excel
 PROPOSALS_FILE = PROPOSALS_PARQUET if os.path.exists(PROPOSALS_PARQUET) else PROPOSALS_XLSX
@@ -14,7 +20,6 @@ os.makedirs("dashboard", exist_ok=True)
 
 from shapely.geometry import Point
 
-from csv_handler import get_clutter_radius_and_name
 import math
 
 CLUTTER_RADII = {

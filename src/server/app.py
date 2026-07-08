@@ -99,7 +99,7 @@ def save_edits_sync(data: SaveEditsRequest):
         else:
             df_outside = df
 
-    from csv_handler import get_clutter_radius_and_name
+    from src.data.csv_handler import get_clutter_radius_and_name
 
     new_rows = []
     for s in edited_sites:
@@ -240,7 +240,7 @@ async def export_csv(airport_name: str):
 async def get_clutter(lat: float = 0, lon: float = 0):
     """Query morphology map for clutter classification at given coordinates."""
     try:
-        from csv_handler import get_clutter_radius_and_name
+        from src.data.csv_handler import get_clutter_radius_and_name
         radius, name = get_clutter_radius_and_name(lon, lat)
         return JSONResponse({"clutter_name": name, "clutter_radius": radius})
     except Exception as e:
